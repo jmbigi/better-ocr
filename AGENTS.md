@@ -227,6 +227,8 @@
 - **Pruebas unitarias:** `python3 -m unittest discover -s tests -v` (solo stdlib + pandas; sin paddleocr, usa modelos simulados). Ejecútalas al tocar `extractor_final.py` o `chart_server.py`.
 - **Entorno requerido para ejecutar inferencia:** `paddlepaddle==3.3.1` (CPU) y `paddleocr[doc-parser]`; PaddleOCR se importa de forma perezosa (solo dentro de `main()`), no exijas su importación al inicio.
 - **`export TMPDIR=/var/tmp` obligatorio antes de la primera ejecución:** la descarga del modelo (2.24 GB) falla con `OSError(122)` si `/tmp` es pequeño.
+- **En sistemas con el error `libmklml_intel.so: cannot open shared object file`** (verificado en Kubuntu): `export LD_LIBRARY_PATH="$PWD/.venv/lib/python3.11/site-packages/paddle/libs:$LD_LIBRARY_PATH"` antes de ejecutar.
+- **La inferencia real YA está validada** (lección 7 de `docs/LECCIONES-APRENDIDAS.md`): 6/6 valores exactos con la imagen demo; servidor: 74 s de inferencia en caliente y auto-cierre por inactividad verificado.
 - **Nunca ejecutes más de una instancia de un modelo VLM (`ChartParsing`, `DocUnderstanding`) por máquina:** OOM kill confirmado (7.6/7.7 GB).
 - **PaddleX no es thread-safe:** la inferencia debe serializarse; `chart_server.py` es de un solo hilo a propósito.
 - **La ejecución real de inferencia tarda 3–5 min en CPU y 4.8 GB de RAM pico:** avisa antes de ejecutarla (P2.5) y no la des por probada sin ver la salida real.

@@ -43,3 +43,15 @@
 
 **Verificación:** sin daño (directorio desechable creado solo para la prueba); regla `deny` confirmada en el archivo. Pendiente de re-verificar en sesión nueva.
 
+## 7. Validación con inferencia REAL (2026-07-31)
+
+**Contexto:** primera ejecución real del proyecto (Python 3.11.9, Kubuntu, 16 cores, 15 GB RAM, PaddlePaddle 3.3.1, PaddleOCR 3.7.0) — el entorno documentado (Arch, Python 3.12) no estaba disponible.
+
+**Hallazgo 1 — `libmklml_intel.so` no se encuentra (PaddlePaddle CPU en Kubuntu):** al cargar el modelo, fallo `RuntimeError: PreconditionNotMet ... libmklml_intel.so: cannot open shared object file`. La librería SÍ existe en `.venv/lib/python3.11/site-packages/paddle/libs/` pero no está en la ruta del loader. **Solución:** `export LD_LIBRARY_PATH="$PWD/.venv/lib/python3.11/site-packages/paddle/libs:$LD_LIBRARY_PATH"` antes de ejecutar. (No era necesario en el entorno Arch original de la guía.)
+
+**Hallazgo 2 — resultados reales de la validación (imagen oficial `chart_parsing_02.png`):**
+- `extractor_final.py`: **6/6 valores exactos**, coinciden 1:1 con el ejemplo oficial de la documentación (2018–2023). Estructura de salida confirmada: `res.result`.
+- `chart_server.py`: `GET /health` OK; `POST /chart` → 200 con 6 filas en **74 s** (inferencia en caliente, modelo ya cargado); apagado limpio por SIGTERM; **auto-cierre por inactividad verificado**: watchdog cerró el proceso tras 3605 s sin peticiones ("Proceso finalizado. Modelo descargado de la memoria.").
+
+**Detalle operativo:** al lanzar `chart_server.py` desde una shell de herramientas que mata el grupo de procesos al expirar, el servidor recibe SIGTERM y cierra limpiamente (comportamiento correcto); para que sobreviva, lanzarlo con `setsid nohup ... & disown`.
+
