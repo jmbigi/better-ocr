@@ -8,7 +8,7 @@ Crear un procedimiento documentado, reproducible y validado en ejecución real p
 - Robustez operativa: gestión del error `OSError(122)` (`TMPDIR`), acceso defensivo a la API de PaddleX, limpieza del Markdown y conversión a CSV.
 - Despliegue real: lecciones empíricas verificadas (una sola instancia por máquina, PaddleX no es thread-safe, patrón daemon persistente).
 
-**Estado:** Verificado parcialmente (gráficos de barras: 6/6 valores exactos). Limitado estrictamente a las pruebas descritas.
+**Estado:** Verificado con ejecución real en dos entornos: Arch (Python 3.12, 6/6 valores exactos en gráfico de barras propio) y Kubuntu (Python 3.11.9, imagen oficial de PaddleOCR: 6/6 valores exactos; servidor validado con 74 s de inferencia en caliente y auto-cierre por inactividad verificado). Limitado estrictamente a las pruebas descritas: gráficos de líneas y otros tipos no garantizados.
 
 ## Archivos del proyecto
 
@@ -35,6 +35,9 @@ pip install -U "paddleocr[doc-parser]"
 
 # 2. Crítico: evitar OSError(122) si /tmp es pequeño
 export TMPDIR=/var/tmp
+
+# 2b. Solo en sistemas con el error "libmklml_intel.so: cannot open shared object file" (verificado en Kubuntu)
+export LD_LIBRARY_PATH="$PWD/.venv/lib/python3.11/site-packages/paddle/libs:$LD_LIBRARY_PATH"
 
 # 3a. Extracción directa con la imagen de prueba
 python extractor_final.py ejemplos/grafico_demo.png

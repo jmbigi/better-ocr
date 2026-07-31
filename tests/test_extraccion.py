@@ -6,6 +6,8 @@ Ejecutar desde la raíz del proyecto:
 No requiere paddleocr (se prueba con modelos simulados); solo pandas.
 """
 
+import contextlib
+import io
 import json
 import sys
 import threading
@@ -94,8 +96,9 @@ class TestObtenerMarkdown(unittest.TestCase):
 
     def test_sin_result_raise(self):
         res = ResultadoFalso({"otra_cosa": 1})
-        with self.assertRaises(KeyError):
-            obtener_markdown(res)
+        with contextlib.redirect_stdout(io.StringIO()):  # silenciar el print de depuracion
+            with self.assertRaises(KeyError):
+                obtener_markdown(res)
 
 
 class ModeloFalso:

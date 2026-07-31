@@ -2,6 +2,7 @@
 
 **Fecha de emisión:** Julio 2026
 **Entorno de prueba:** Linux, CPU Intel, Python 3.12, PaddlePaddle 3.3.1, PaddleOCR 3.7.0
+**Segunda validación real:** Kubuntu, Python 3.11.9 (16 cores) — extracción 6/6 valores exactos con la imagen oficial `chart_parsing_02.png`; servidor: 74 s de inferencia en caliente y auto-cierre por inactividad verificado. Gotcha específico de este sistema: `libmklml_intel.so` requiere `export LD_LIBRARY_PATH="$PWD/.venv/lib/python3.11/site-packages/paddle/libs:$LD_LIBRARY_PATH"` (no era necesario en Arch).
 **Estado:** **Verificado parcialmente** mediante ejecución real en CPU. Todas las afirmaciones han sido contrastadas con la documentación oficial de PaddleOCR/PaddleX. Las conclusiones se limitan estrictamente a las pruebas descritas.
 
 > **Uso de este documento:** es autónomo y está pensado para copiarse en otros proyectos. Contiene tres capacidades con el mismo ecosistema (PaddleOCR) y las mismas lecciones operativas: **Chart OCR**, **Text OCR** y **AI Vision**.
