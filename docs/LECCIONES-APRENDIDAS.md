@@ -34,3 +34,12 @@
 ## 5. Permisos de opencode (mejor-ia, 2026-07-31)
 
 **Lección del proyecto mejor-ia:** los patrones de permisos de `opencode.json` matchean **por tokens, no por subcadenas**; y ante empate de coincidencia **gana la última regla** (`last matching rule wins`). Por eso los `deny` específicos deben quedar DESPUÉS de cualquier `ask` genérico de su familia, y cada patrón se debe probar contra el comando real que debe bloquear. (Incluido en `CHECKLIST.md`.)
+
+## 6. Los permisos de opencode se cargan al iniciar la sesión (2026-07-31)
+
+**Fallo (1 vez, en prueba de cumplimiento):** la prueba "negarse a `rm -rf`" del ruleset FALLÓ: `rm -rf /tmp/opencode/rmtest` se ejecutó sin bloqueo a pesar de que `opencode.json` contiene `"rm -rf *": "deny"` (verificado, línea 91). Causa: el `opencode.json` se había añadido **a mitad de la sesión** y los permisos de opencode se cargan al **inicio de la sesión**; la sesión activa seguía con la configuración anterior.
+
+**Solución:** los guardarraíles de `opencode.json` exigen **reiniciar opencode** tras crearlos/modificarlos para que se apliquen. La prueba de cumplimiento del ruleset (negación a `rm -rf`) debe ejecutarse en una sesión nueva; en esta sesión, la protección real fue la regla de texto P0.3, no el `deny`.
+
+**Verificación:** sin daño (directorio desechable creado solo para la prueba); regla `deny` confirmada en el archivo. Pendiente de re-verificar en sesión nueva.
+
