@@ -225,6 +225,7 @@
 
 - **Verificación de sintaxis:** `python3 -m py_compile extractor_final.py chart_server.py` (sin dependencias externas).
 - **Pruebas unitarias:** `python3 -m unittest discover -s tests -v` (solo stdlib + pandas; sin paddleocr, usa modelos simulados). Ejecútalas al tocar `extractor_final.py` o `chart_server.py`.
+- **CI en GitHub Actions** (`.github/workflows/ci.yml`): ejecuta sintaxis + tests en Python 3.11 y 3.12 en cada push a `master`.
 - **Entorno requerido para ejecutar inferencia:** `paddlepaddle==3.3.1` (CPU) y `paddleocr[doc-parser]`; PaddleOCR se importa de forma perezosa (solo dentro de `main()`), no exijas su importación al inicio.
 - **`export TMPDIR=/var/tmp` obligatorio antes de la primera ejecución:** la descarga del modelo (2.24 GB) falla con `OSError(122)` si `/tmp` es pequeño.
 - **En sistemas con el error `libmklml_intel.so: cannot open shared object file`** (verificado en Kubuntu): `export LD_LIBRARY_PATH="$PWD/.venv/lib/python3.11/site-packages/paddle/libs:$LD_LIBRARY_PATH"` antes de ejecutar.
