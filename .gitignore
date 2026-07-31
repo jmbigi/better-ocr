@@ -1,0 +1,14 @@
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+env/
+
+# Salidas generadas por los scripts
+salida_bruta.json
+datos_extraidos.csv
+ocr_salida_bruta.json
+ocr_texto_extraido.txt
+vision_salida_bruta.json
+vision_respuesta.txt
