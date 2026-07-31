@@ -2,8 +2,9 @@
 """Extracción de datos tabulares de gráficos con PP-Chart2Table (PaddleOCR).
 
 Uso: python extractor_final.py [ruta/a/imagen.png]
+     (por defecto usa ejemplos/grafico_demo.png)
 
-Requiere: paddlepaddle==3.3.1 (CPU) y "paddleocr[doc-parser]".
+Requiere: paddlepaddle==3.3.1 (CPU) y "paddleocr[doc-parser]" (ver requirements.txt).
 Antes de la primera ejecución: export TMPDIR=/var/tmp (evitar OSError 122).
 """
 
@@ -92,5 +93,5 @@ def main(imagen: str) -> None:
 
 
 if __name__ == "__main__":
-    ruta = sys.argv[1] if len(sys.argv) > 1 else "ruta/a/tu/grafico.png"
+    ruta = sys.argv[1] if len(sys.argv) > 1 else "ejemplos/grafico_demo.png"
     main(ruta)

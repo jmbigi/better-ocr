@@ -18,8 +18,9 @@ Crear un procedimiento documentado, reproducible y validado en ejecución real p
 | `opencode.json` | **Guardarraíles deterministas** para opencode: `deny` de comandos destructivos (`rm -rf`, `git reset --hard`, etc.) y edición/lectura de `.env`. Se aplican en runtime sin depender del modelo. |
 | `CHECKLIST.md` | Checklist de verificación pre-entrega (imprimible). |
 | `README.md` | Este archivo: objetivos del proyecto y referencias a sus archivos. |
-| `extractor_final.py` | Script principal validado: extrae la tabla del gráfico con `ChartParsing` y genera `datos_extraidos.csv` + `salida_bruta.json` para depuración. Expone `obtener_markdown()` y `markdown_a_df()` reutilizables. |
+| `extractor_final.py` | Script principal validado: extrae la tabla del gráfico con `ChartParsing` y genera `datos_extraidos.csv` + `salida_bruta.json` para depuración. Expone `obtener_markdown()` y `markdown_a_df()` reutilizables. Por defecto usa la imagen demo (`ejemplos/grafico_demo.png`). |
 | `chart_server.py` | Daemon HTTP persistente (POST `/chart` → `markdown` + `csv`, GET `/health`). Carga el modelo una sola vez y **se cierra solo tras 1 hora sin peticiones de inferencia** (no queda procesos en memoria). |
+| `requirements.txt` | Dependencias del proyecto (paddlepaddle 3.3.1, paddleocr[doc-parser] 3.7.0, pandas). |
 | `tests/test_extraccion.py` | Pruebas unitarias (stdlib + pandas, sin paddleocr): filtrado de separadores, conversión a DataFrame, acceso a la API y servidor HTTP con modelo simulado. |
 | `docs/GUIA_OCR_VISION.md` | **Documento general reutilizable** (se puede pegar en otros proyectos). Incluye Chart OCR, Text OCR y AI Vision con PaddleOCR. |
 | `docs/LECCIONES-APRENDIDAS.md` | Memoria del proyecto: fallos, hallazgos y soluciones (referenciada desde `AGENTS.md`). |
@@ -31,7 +32,7 @@ Crear un procedimiento documentado, reproducible y validado en ejecución real p
 ```bash
 # 1. Entorno (ver GUIA_OCR_VISION.md para detalles y advertencias)
 pip install paddlepaddle==3.3.1 -i https://www.paddlepaddle.org.cn/packages/stable/cpu/
-pip install -U "paddleocr[doc-parser]"
+pip install -r requirements.txt   # el resto (paddleocr[doc-parser], pandas) desde PyPI
 
 # 2. Crítico: evitar OSError(122) si /tmp es pequeño
 export TMPDIR=/var/tmp
