@@ -19,7 +19,8 @@ Crear un procedimiento documentado, reproducible y validado en ejecución real p
 | `CHECKLIST.md` | Checklist de verificación pre-entrega (imprimible). |
 | `README.md` | Este archivo: objetivos del proyecto y referencias a sus archivos. |
 | `extractor_final.py` | Script principal validado: extrae la tabla del gráfico con `ChartParsing` y genera `datos_extraidos.csv` + `salida_bruta.json` para depuración. Expone `obtener_markdown()` y `markdown_a_df()` reutilizables. |
-| `chart_server.py` | Daemon HTTP persistente (POST `/chart` → `markdown` + `csv`, GET `/health`). Carga el modelo una sola vez y **se cierra solo tras 1 hora sin peticiones de inferencia** (no queda procesos en memoria). Probado con modelo simulado. |
+| `chart_server.py` | Daemon HTTP persistente (POST `/chart` → `markdown` + `csv`, GET `/health`). Carga el modelo una sola vez y **se cierra solo tras 1 hora sin peticiones de inferencia** (no queda procesos en memoria). |
+| `tests/test_extraccion.py` | Pruebas unitarias (stdlib + pandas, sin paddleocr): filtrado de separadores, conversión a DataFrame, acceso a la API y servidor HTTP con modelo simulado. |
 | `docs/GUIA_OCR_VISION.md` | **Documento general reutilizable** (se puede pegar en otros proyectos). Incluye Chart OCR, Text OCR y AI Vision con PaddleOCR. |
 | `docs/LECCIONES-APRENDIDAS.md` | Memoria del proyecto: fallos, hallazgos y soluciones (referenciada desde `AGENTS.md`). |
 | `ejemplos/grafico_demo.png` | Imagen de prueba oficial de PaddleOCR (gráfico de ejemplo, descargada del repositorio oficial). |
@@ -42,6 +43,16 @@ python extractor_final.py ejemplos/grafico_demo.png
 python chart_server.py --port 8080
 curl -X POST http://127.0.0.1:8080/chart -H 'Content-Type: application/json' \
      -d '{"image": "ejemplos/grafico_demo.png"}'
+```
+
+## Pruebas
+
+```bash
+# Sintaxis (sin dependencias)
+python3 -m py_compile extractor_final.py chart_server.py
+
+# Pruebas unitarias (solo stdlib + pandas; paddleocr se simula)
+python3 -m unittest discover -s tests -v
 ```
 
 ## Salidas generadas por `extractor_final.py`

@@ -19,11 +19,13 @@ def es_fila_separadora(linea: str) -> bool:
     """True si la linea es una fila separadora de tabla markdown.
 
     Cubre los dos formatos posibles del modelo: '--- | ---' (sin pipe inicial)
-    y '| --- | --- |' (con pipes). Cada celda debe ser solo guiones, opcionalmente
-    con ':' de alineacion (':--', '--:', ':-:')."""
+    y '| --- | --- |' (con pipes). Cada celda debe ser solo guiones (3 o mas,
+    como exige el estandar markdown), opcionalmente con ':' de alineacion
+    (':---', '---:', ':---:'). Un guion simple o doble es un dato, no un
+    separador."""
     celulas = [c.strip() for c in linea.strip().strip('|').split('|')]
     celulas = [c for c in celulas if c != '']
-    return bool(celulas) and all(re.fullmatch(r':?-+:?', c) for c in celulas)
+    return bool(celulas) and all(re.fullmatch(r':?-{3,}:?', c) for c in celulas)
 
 
 def obtener_markdown(res):

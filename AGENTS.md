@@ -223,7 +223,8 @@
 
 ## Reglas específicas de este proyecto (extract-charts)
 
-- **Verificación de sintaxis:** `python3 -m py_compile extractor_final.py chart_server.py` (sin dependencias externas; este es el único check automático del proyecto).
+- **Verificación de sintaxis:** `python3 -m py_compile extractor_final.py chart_server.py` (sin dependencias externas).
+- **Pruebas unitarias:** `python3 -m unittest discover -s tests -v` (solo stdlib + pandas; sin paddleocr, usa modelos simulados). Ejecútalas al tocar `extractor_final.py` o `chart_server.py`.
 - **Entorno requerido para ejecutar inferencia:** `paddlepaddle==3.3.1` (CPU) y `paddleocr[doc-parser]`; PaddleOCR se importa de forma perezosa (solo dentro de `main()`), no exijas su importación al inicio.
 - **`export TMPDIR=/var/tmp` obligatorio antes de la primera ejecución:** la descarga del modelo (2.24 GB) falla con `OSError(122)` si `/tmp` es pequeño.
 - **Nunca ejecutes más de una instancia de un modelo VLM (`ChartParsing`, `DocUnderstanding`) por máquina:** OOM kill confirmado (7.6/7.7 GB).

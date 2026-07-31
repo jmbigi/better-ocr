@@ -7,9 +7,11 @@
 
 **Fallo (1 vez, detectado en revisión):** la fila separadora `|---|---|` NO se eliminaba al convertir a DataFrame. El filtro original solo buscaba líneas que **empiezan** por `---`, pero el modelo puede emitir la fila con pipes iniciales (`| --- | --- |`), que nunca coincidía.
 
-**Solución:** nueva función `es_fila_separadora()` en `extractor_final.py`: quita pipes de los bordes, divide por `|` y verifica que todas las celdas coincidan con `:?-+:?` (guiones con alineación opcional). Cubre ambos formatos del modelo. Aplicado también al script de la guía (`docs/GUIA_OCR_VISION.md`).
+**Solución:** nueva función `es_fila_separadora()` en `extractor_final.py`: quita pipes de los bordes, divide por `|` y verifica que todas las celdas coincidan con `:?-{3,}:?` (guiones con alineación opcional). Cubre ambos formatos del modelo. Aplicado también al script de la guía (`docs/GUIA_OCR_VISION.md`).
 
-**Verificación:** prueba del servidor con modelo simulado — el CSV de salida dejó de contener la fila `---,---`.
+**Refinamiento (segunda revisión, detectado por tests unitarios):** el regex inicial `:?-+:?` también clasificaba celdas de **dato** con guiones simples/dobles (`| - | - |`, ej. valores "-") como separadores, con pérdida de datos. El estándar markdown exige **3 o más guiones** en el separador: regex final `:?-{3,}:?`.
+
+**Verificación:** prueba del servidor con modelo simulado + `tests/test_extraccion.py` (14 tests: `python3 -m unittest discover -s tests -v`).
 
 ## 2. Importación perezosa de PaddleOCR (2026-07-31)
 
