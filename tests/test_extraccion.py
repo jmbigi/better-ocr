@@ -17,10 +17,12 @@ import urllib.error
 import urllib.request
 from http.server import HTTPServer
 
+import pandas as pd
+
 sys.path.insert(0, ".")
 
 import chart_server
-from extractor_final import es_fila_separadora, markdown_a_df, obtener_markdown
+from extractor_final import es_fila_separadora, markdown_a_df, obtener_markdown, validar_imagen
 
 
 class TestFilaSeparadora(unittest.TestCase):
@@ -77,6 +79,21 @@ class TestMarkdownADf(unittest.TestCase):
         df = markdown_a_df(md)
         self.assertEqual(len(df), 1)
 
+    def test_markdown_vacio_raise(self):
+        for md in ["", "   ", "--- | ---\n", "| --- | --- |\n\n"]:
+            with self.subTest(md=repr(md)):
+                with self.assertRaises(ValueError):
+                    markdown_a_df(md)
+
+
+class TestValidarImagen(unittest.TestCase):
+    def test_imagen_inexistente(self):
+        with self.assertRaises(FileNotFoundError):
+            validar_imagen("no_existe_esta_imagen.png")
+
+    def test_imagen_existente(self):
+        self.assertEqual(validar_imagen("ejemplos/grafico_demo.png"), "ejemplos/grafico_demo.png")
+
 
 class ResultadoFalso:
     """Objeto Result de PaddleX simulado (solo el atributo .json)."""
@@ -92,6 +109,23 @@ class TestObtenerMarkdown(unittest.TestCase):
 
     def test_result_dentro_de_res(self):
         res = ResultadoFalso({"res": {"image": "x.png", "result": "A | B\n1 | 2"}})
+        self.assertEqual(obtener_markdown(res), "A | B\n1 | 2")
+
+    def test_result_vacio_o_none_tratado_como_ausente(self):
+        for datos in [
+            {"result": None},
+            {"result": ""},
+            {"res": {"result": None}},
+            {"res": {"result": ""}},
+        ]:
+            with self.subTest(datos=datos):
+                res = ResultadoFalso(datos)
+                with contextlib.redirect_stdout(io.StringIO()):
+                    with self.assertRaises(KeyError):
+                        obtener_markdown(res)
+
+    def test_result_vacio_en_raiz_pero_presente_en_res(self):
+        res = ResultadoFalso({"result": None, "res": {"result": "A | B\n1 | 2"}})
         self.assertEqual(obtener_markdown(res), "A | B\n1 | 2")
 
     def test_sin_result_raise(self):
@@ -176,9 +210,33 @@ class TestChartServer(unittest.TestCase):
             codigo, cuerpo = e.code, json.loads(e.read().decode())
         self.assertEqual(codigo, 400)
 
+    def test_chart_cuerpo_demasiado_grande(self):
+        # Un cuerpo mayor que MAX_CUERPO debe rechazarse con 413 sin procesarse
+        r = urllib.request.Request(
+            self.BASE + "/chart",
+            data=b"x" * (chart_server.MAX_CUERPO + 1),
+            method="POST",
+            headers={"Content-Type": "application/json"},
+        )
+        try:
+            with urllib.request.urlopen(r) as resp:
+                codigo, _ = resp.status, resp.read().decode()
+        except urllib.error.HTTPError as e:
+            codigo, _ = e.code, e.read().decode()
+        self.assertEqual(codigo, 413)
+
     def test_ruta_desconocida(self):
         codigo, _ = self._req("/otra")
         self.assertEqual(codigo, 404)
+
+
+class TestDFAMarkdown(unittest.TestCase):
+    def test_celda_multilinea_no_rompe_tabla(self):
+        df = pd.DataFrame({"A": ["x\ny"], "B": [1]})
+        md = chart_server.df_a_markdown(df)
+        lineas = md.splitlines()
+        self.assertEqual(len(lineas), 3)  # cabecera + separador + 1 fila
+        self.assertIn("| x y | 1 |", lineas[2])
 
 
 class TestCierrePorInactividad(unittest.TestCase):

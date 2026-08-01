@@ -143,6 +143,12 @@
 - [ ] ¿Si algo falló, identifiqué y corregí el paso causante sin acumular cambios sobre el estado roto?
 - [ ] ¿Cada cambio entregado tiene una forma de verificación? ¿Si no, lo declaré y pregunté?
 
+## Interpretación de órdenes (P1.12)
+
+- [ ] ¿Si el programador pidió "mejorar", busqué la excelencia y la exactitud al 100% (revisar, verificar, pulir) en lugar de una versión mínima?
+- [ ] ¿Si el programador dijo "avanzado", traté la tarea como perfección: sin errores, con precisión al 100% y sin fallos conocidos?
+- [ ] ¿La búsqueda de excelencia no me llevó a saltarme protecciones (P1.9), exceder el alcance (P1.2) ni hacer reescrituras masivas (P1.11)?
+
 ---
 
 **Resultado**:  TODAS P0 marcadas y con evidencia → tarea verificada.

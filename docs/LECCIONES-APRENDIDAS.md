@@ -11,7 +11,7 @@
 
 **Refinamiento (segunda revisión, detectado por tests unitarios):** el regex inicial `:?-+:?` también clasificaba celdas de **dato** con guiones simples/dobles (`| - | - |`, ej. valores "-") como separadores, con pérdida de datos. El estándar markdown exige **3 o más guiones** en el separador: regex final `:?-{3,}:?`.
 
-**Verificación:** prueba del servidor con modelo simulado + `tests/test_extraccion.py` (14 tests: `python3 -m unittest discover -s tests -v`).
+**Verificación:** prueba del servidor con modelo simulado + `tests/test_extraccion.py` (21 tests: `python3 -m unittest discover -s tests -v`).
 
 ## 2. Importación perezosa de PaddleOCR (2026-07-31)
 
@@ -31,9 +31,9 @@
 
 **Solución:** `df_a_markdown()` en `chart_server.py` genera la tabla markdown manualmente (sin dependencias). El proyecto sigue usando solo: `pandas` + `paddlepaddle` + `paddleocr[doc-parser]`.
 
-## 5. Permisos de opencode (mejor-ia, 2026-07-31)
+## 5. Permisos de opencode (better-ai, 2026-07-31)
 
-**Lección del proyecto mejor-ia:** los patrones de permisos de `opencode.json` matchean **por tokens, no por subcadenas**; y ante empate de coincidencia **gana la última regla** (`last matching rule wins`). Por eso los `deny` específicos deben quedar DESPUÉS de cualquier `ask` genérico de su familia, y cada patrón se debe probar contra el comando real que debe bloquear. (Incluido en `CHECKLIST.md`.)
+**Lección del proyecto better-ai:** los patrones de permisos de `opencode.json` matchean **por tokens, no por subcadenas**; y ante empate de coincidencia **gana la última regla** (`last matching rule wins`). Por eso los `deny` específicos deben quedar DESPUÉS de cualquier `ask` genérico de su familia, y cada patrón se debe probar contra el comando real que debe bloquear. (Incluido en `CHECKLIST.md`.)
 
 ## 6. Los permisos de opencode se cargan al iniciar la sesión (2026-07-31)
 

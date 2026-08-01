@@ -9,11 +9,25 @@ Antes de la primera ejecución: export TMPDIR=/var/tmp (evitar OSError 122).
 """
 
 import json
+import os
 import re
 import sys
 from io import StringIO
 
 import pandas as pd
+
+
+def validar_imagen(imagen: str) -> str:
+    """Valida que la ruta de la imagen exista, con mensaje claro.
+
+    Se ejecuta ANTES de cargar el modelo (que tarda 3-5 min y ocupa 4.8 GB
+    de RAM): un typo en la ruta no debe desperdiciar la carga del modelo.
+    """
+    if not os.path.exists(imagen):
+        raise FileNotFoundError(
+            f"La imagen no existe: '{imagen}'. Revisa la ruta antes de ejecutar."
+        )
+    return imagen
 
 
 def es_fila_separadora(linea: str) -> bool:
@@ -33,12 +47,15 @@ def obtener_markdown(res):
     """Acceso robusto a la clave 'result' del objeto Result de PaddleX.
 
     La estructura puede variar: 'result' en raíz o dentro de 'res'.
+    Un 'result' presente pero vacio (None o '') se trata como ausente:
+    la tabla extraida siempre tiene contenido si el modelo respondio bien.
     Devuelve el markdown de la tabla o lanza KeyError si no se encuentra.
     """
-    if "result" in res.json:
+    if res.json.get("result"):
         return res.json["result"]
-    if "res" in res.json and "result" in res.json["res"]:
-        return res.json["res"]["result"]
+    res_anidado = res.json.get("res") or {}
+    if res_anidado.get("result"):
+        return res_anidado["result"]
     print("Estructura JSON recibida:", json.dumps(res.json, indent=2))
     raise KeyError("No se encontró la clave 'result' en la respuesta. Revisa salida_bruta.json.")
 
@@ -57,6 +74,12 @@ def markdown_a_df(markdown_tabla: str) -> pd.DataFrame:
     ]
     markdown_limpio = "\n".join(lineas_filtradas).strip()
 
+    if not markdown_limpio:
+        raise ValueError(
+            "El markdown del modelo está vacío (solo filas separadoras o líneas en blanco). "
+            "Revisa salida_bruta.json: el modelo pudo no haber reconocido la tabla."
+        )
+
     df = pd.read_csv(StringIO(markdown_limpio), sep=r"\s*\|\s*", engine="python")
     df = df.dropna(axis=1, how='all')
     df = df.loc[:, ~df.columns.str.contains('^Unnamed')]
@@ -64,6 +87,7 @@ def markdown_a_df(markdown_tabla: str) -> pd.DataFrame:
 
 
 def main(imagen: str) -> None:
+    validar_imagen(imagen)  # antes de cargar el modelo (3-5 min, 4.8 GB)
     from paddleocr import ChartParsing  # import perezoso: no exigir paddleocr al importar el modulo
 
     # 1. Inicializar el modelo (la primera ejecución descargará el modelo en TMPDIR)

@@ -8,6 +8,7 @@ de inferencia. No queda ningún proceso en memoria entre usos.
 Endpoints:
   POST /chart  {"image": "<ruta o URL a la imagen>"}
                -> {"ok": true, "filas": n, "markdown": "...", "csv": "..."}
+               (400 JSON invalido/vacio, 413 cuerpo > 1 MB, 500 error interno)
   GET  /health -> {"status": "ok", "modelo": "PP-Chart2Table", "uptime_s": ...}
 
 Diseño:
@@ -44,6 +45,10 @@ from extractor_final import markdown_a_df, obtener_markdown
 
 LOG = logging.getLogger("chart_server")
 
+# El cuerpo solo contiene JSON con una ruta o URL: 1 MB sobra con margen.
+# Limita la memoria de peticiones maliciosas o rotas (respuesta 413).
+MAX_CUERPO = 1_048_576
+
 
 def cargar_modelo():
     from paddleocr import ChartParsing
@@ -59,11 +64,16 @@ def df_a_markdown(df: "pd.DataFrame") -> str:
 
     (No se usa df.to_markdown(): requiere el paquete 'tabulate', que no es
     dependencia del proyecto y rompería la respuesta si no está instalado.)
+    Los saltos de línea dentro de una celda se sustituyen por espacios para
+    no romper la estructura de la tabla markdown.
     """
-    cabecera = "| " + " | ".join(str(c) for c in df.columns) + " |"
+    def celda(v) -> str:
+        return str(v).replace("\n", " ").replace("\r", " ")
+
+    cabecera = "| " + " | ".join(celda(c) for c in df.columns) + " |"
     separador = "| " + " | ".join("---" for _ in df.columns) + " |"
     filas = [
-        "| " + " | ".join(str(v) for v in fila) + " |"
+        "| " + " | ".join(celda(v) for v in fila) + " |"
         for fila in df.itertuples(index=False)
     ]
     return "\n".join([cabecera, separador] + filas)
@@ -106,6 +116,9 @@ def crear_handler(modelo, estado):
                 return
             if largo <= 0:
                 self._enviar_json(400, {"ok": False, "error": "Cuerpo JSON vacio"})
+                return
+            if largo > MAX_CUERPO:
+                self._enviar_json(413, {"ok": False, "error": "Cuerpo demasiado grande"})
                 return
             try:
                 datos = json.loads(self.rfile.read(largo).decode("utf-8"))

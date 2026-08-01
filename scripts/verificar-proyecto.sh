@@ -46,6 +46,8 @@ assert not faltan, 'referencias rotas: ' + str(faltan)
 "
 check "ningun .env versionado en git" bash -c "test -z \"\$(git ls-files | grep -E '\\.env(\$|\\.)' | grep -v '\\.env\\.example')\""
 check "sin dependencia de GitHub Actions (.github eliminado)" bash -c "test ! -d .github"
+check "IDs citados en CHECKLIST y README existen en AGENTS.md" bash -c "test -z \"\$(comm -23 <(grep -ohE 'P[0-2]\\.[0-9]+' CHECKLIST.md README.md | sort -u) <(grep -ohE 'P[0-2]\\.[0-9]+' AGENTS.md | sort -u))\""
+check "sin referencias obsoletas en AGENTS.md/README.md (master, GitHub Actions, better-ia)" bash -c "! grep -E '(GitHub Actions|branches: \\[master\\]|push a \`master\`|better-ia|\\.github/workflows)' AGENTS.md README.md"
 
 echo "== 2. Sintaxis y pruebas =="
 check "sintaxis: extractor_final.py" python3 -m py_compile extractor_final.py

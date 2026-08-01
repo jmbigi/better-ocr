@@ -14,7 +14,7 @@ Crear un procedimiento documentado, reproducible y validado en ejecución real p
 
 | Archivo | Descripción |
 | :--- | :--- |
-| `AGENTS.md` | **Reglas de IA del proyecto** (conjunto [better-ia](https://github.com/jmbigi/better-ia), CC BY-SA 4.0, con reglas específicas de este proyecto añadidas). opencode lo carga automáticamente en cada sesión. |
+| `AGENTS.md` | **Reglas de IA del proyecto** (conjunto [better-ai](https://github.com/jmbigi/better-ai), CC BY-SA 4.0, con reglas específicas de este proyecto añadidas). opencode lo carga automáticamente en cada sesión. |
 | `opencode.json` | **Guardarraíles deterministas** para opencode: `deny` de comandos destructivos (`rm -rf`, `git reset --hard`, etc.) y edición/lectura de `.env`. Se aplican en runtime sin depender del modelo. |
 | `CHECKLIST.md` | Checklist de verificación pre-entrega (imprimible). |
 | `README.md` | Este archivo: objetivos del proyecto y referencias a sus archivos. |
@@ -22,6 +22,8 @@ Crear un procedimiento documentado, reproducible y validado en ejecución real p
 | `chart_server.py` | Daemon HTTP persistente (POST `/chart` → `markdown` + `csv`, GET `/health`). Carga el modelo una sola vez y **se cierra solo tras 1 hora sin peticiones de inferencia** (no queda procesos en memoria). |
 | `requirements.txt` | Dependencias del proyecto (paddlepaddle 3.3.1, paddleocr[doc-parser] 3.7.0, pandas). |
 | `tests/test_extraccion.py` | Pruebas unitarias (stdlib + pandas, sin paddleocr): filtrado de separadores, conversión a DataFrame, acceso a la API y servidor HTTP con modelo simulado. |
+| `scripts/verificar-proyecto.sh` | Verificación local completa (open source, sin cuentas): sintaxis, tests, reglas P0/P1, config, seguridad y repo. `bash scripts/verificar-proyecto.sh`. |
+| `scripts/hooks/pre-commit` | Hook git local que ejecuta la verificación antes de cada commit (instalación: `cp scripts/hooks/pre-commit .git/hooks/pre-commit`). |
 | `docs/GUIA_OCR_VISION.md` | **Documento general reutilizable** (se puede pegar en otros proyectos). Incluye Chart OCR, Text OCR y AI Vision con PaddleOCR. |
 | `docs/LECCIONES-APRENDIDAS.md` | Memoria del proyecto: fallos, hallazgos y soluciones (referenciada desde `AGENTS.md`). |
 | `ejemplos/grafico_demo.png` | Imagen de prueba oficial de PaddleOCR (gráfico de ejemplo, descargada del repositorio oficial). |
