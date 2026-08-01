@@ -1,7 +1,5 @@
 # extract-charts — Extracción de datos en gráficos mixtos (CPU)
 
-[![CI](https://github.com/jmbigi/better-ocr/actions/workflows/ci.yml/badge.svg)](https://github.com/jmbigi/better-ocr/actions/workflows/ci.yml)
-
 ## Objetivo del proyecto
 
 Crear un procedimiento documentado, reproducible y validado en ejecución real para **extraer datos tabulares de gráficos mixtos (barras + líneas)** usando el módulo **PP‑Chart2Table** de PaddleOCR sobre **CPU, Python 3.12 y sin GPU**, con especial énfasis en:
@@ -61,7 +59,7 @@ python3 -m py_compile extractor_final.py chart_server.py
 python3 -m unittest discover -s tests -v
 ```
 
-*CI en GitHub Actions (`.github/workflows/ci.yml`): ejecuta sintaxis + tests en Python 3.11 y 3.12 en cada push.*
+*Verificación local (open source, sin cuentas ni servicios externos): `bash scripts/verificar-proyecto.sh` ejecuta sintaxis + tests + checks de reglas, config y seguridad, y el hook `pre-commit` la ejecuta automáticamente antes de cada commit (instalación: `cp scripts/hooks/pre-commit .git/hooks/pre-commit`).*
 
 ## Salidas generadas por `extractor_final.py`
 

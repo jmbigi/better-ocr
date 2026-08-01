@@ -36,6 +36,7 @@
 | P1.9 | Utiliza protecciones (safeguards) contra riesgos: identifica el riesgo y aplica la protección (dry-run, backup, transacciones, entornos aislados, permisos) antes de actuar | 🟠 P1 | Daños evitables por saltarse protecciones |
 | P1.10 | Respeta la consistencia y coherencia; muestra y explica las contradicciones que detectes | 🟠 P1 | Incoherencias ocultas, respuestas contradictorias |
 | P1.11 | Cambios graduales y probados: pequeños, incrementales, verificados paso a paso; sin big bang ni cambios acumulados sobre estados rotos | 🟠 P1 | Entregas rotas por reescrituras masivas |
+| P1.12 | "Mejorar" = excelencia y exactitud al 100%; "avanzado" = perfección, sin errores y precisión al 100% | 🟠 P1 | Entrega mediocre cuando se pidió excelencia |
 | P2.1–2.5 | Preferencias: open source, no duplicar archivos, cambios pequeños, nombres descriptivos, avisar antes de tareas amplias | 🟢 P2 | Fricción y decisiones contrarias al usuario |
 
 ---
@@ -195,6 +196,11 @@
 - Si una parte falla: identifica el paso que lo causó (los pasos pequeños lo hacen fácil) y corrige ese paso, sin seguir acumulando cambios sobre un estado roto.
 - Un cambio que no se puede probar no se entrega: si no hay forma de verificar, decláralo y pregunta.
 
+### P1.12 Interpreta "mejorar" y "avanzado" con el máximo rigor
+- Cuando el programador pide **"mejorar"**: busca la excelencia y la exactitud al 100%. No entregues una versión mínima: revisa, verifica y pule hasta que cada detalle sea correcto y demostrable.
+- Cuando el programador dice **"avanzado"**: significa que busca la perfección: sin errores y con precisión al 100%. Verifica cada paso (P1.1), revisa casos límite y no entregues nada con fallos conocidos.
+- La excelencia se demuestra con evidencia real (P0.1) y no exime de las demás reglas: sin saltarse protecciones (P1.9), sin exceder el alcance (P1.2) y sin reescrituras masivas (P1.11).
+
 ---
 
 ## P2 — Preferencias (cuando aplique)
@@ -204,6 +210,14 @@
 - P2.3. Mantén los cambios pequeños y revisables (commits atómicos si se piden).
 - P2.4. Usa nombres descriptivos y consistentes con el proyecto.
 - P2.5. Si una tarea puede tardar o tener efectos amplios: avisa antes de empezar.
+
+---
+
+## Entorno del proyecto (modelo de IA)
+
+- Modelos permitidos (precio bajo): **`opencode/deepseek-v4-flash-free`** o **`opencode-go/deepseek-v4-flash`**.
+- PROHIBIDO usar cualquier otro modelo (incluidos `pro` y otros proveedores) sin permiso explícito del programador o presupuesto aprobado.
+- Nota: a diferencia del ruleset better-ai, el `opencode.json` de ESTE proyecto NO declara `enabled_providers`: la prohibición de modelos aquí es solo regla de texto (no determinista).
 
 ---
 
@@ -225,7 +239,7 @@
 
 - **Verificación de sintaxis:** `python3 -m py_compile extractor_final.py chart_server.py` (sin dependencias externas).
 - **Pruebas unitarias:** `python3 -m unittest discover -s tests -v` (solo stdlib + pandas; sin paddleocr, usa modelos simulados). Ejecútalas al tocar `extractor_final.py` o `chart_server.py`.
-- **CI en GitHub Actions** (`.github/workflows/ci.yml`): ejecuta sintaxis + tests en Python 3.11 y 3.12 en cada push a `master`.
+- **Verificación local obligatoria (sin GitHub/CI externo):** `bash scripts/verificar-proyecto.sh` ejecuta sintaxis + tests + checks de reglas, config y seguridad; hook `pre-commit` en `scripts/hooks/pre-commit` (instalación: `cp scripts/hooks/pre-commit .git/hooks/pre-commit`).
 - **Entorno requerido para ejecutar inferencia:** `paddlepaddle==3.3.1` (CPU) y `paddleocr[doc-parser]`; PaddleOCR se importa de forma perezosa (solo dentro de `main()`), no exijas su importación al inicio.
 - **`export TMPDIR=/var/tmp` obligatorio antes de la primera ejecución:** la descarga del modelo (2.24 GB) falla con `OSError(122)` si `/tmp` es pequeño.
 - **En sistemas con el error `libmklml_intel.so: cannot open shared object file`** (verificado en Kubuntu): `export LD_LIBRARY_PATH="$PWD/.venv/lib/python3.11/site-packages/paddle/libs:$LD_LIBRARY_PATH"` antes de ejecutar.
@@ -240,10 +254,10 @@ Se actualizan en `docs/LECCIONES-APRENDIDAS.md` tras cada prueba, fallo o hallaz
 
 ## Referencias
 
-Origen y autoría de este conjunto de reglas: [jmbigi/better-ia](https://github.com/jmbigi/better-ia) (CC BY-SA 4.0); detalle, justificación y fuentes de cada regla en su `docs/REGLAS-COMPLETAS.md` y evidencia de pruebas en su `docs/PRUEBAS.md`.
+Origen y autoría de este conjunto de reglas: [jmbigi/better-ai](https://github.com/jmbigi/better-ai) (CC BY-SA 4.0); detalle, justificación y fuentes de cada regla en su `docs/REGLAS-COMPLETAS.md` y evidencia de pruebas en su `docs/PRUEBAS.md`.
 Checklist imprimible: `CHECKLIST.md`
 Memoria del proyecto: `docs/LECCIONES-APRENDIDAS.md`
 
 ---
 
-*Este archivo proviene de [jmbigi/better-ia](https://github.com/jmbigi/better-ia) (CC BY-SA 4.0), con reglas específicas del proyecto añadidas.*
+*Este archivo proviene de [jmbigi/better-ai](https://github.com/jmbigi/better-ai) (CC BY-SA 4.0), con reglas específicas del proyecto añadidas.*

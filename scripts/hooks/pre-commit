@@ -1,0 +1,7 @@
+#!/usr/bin/env bash
+# Hook pre-commit LOCAL (sin dependencias de GitHub/CI).
+# Instalación:  cp scripts/hooks/pre-commit .git/hooks/pre-commit
+# Verifica reglas, config y seguridad antes de cada commit.
+set -u
+cd "$(dirname "$0")/../.." || exit 1
+bash scripts/verificar-proyecto.sh --pre-commit
