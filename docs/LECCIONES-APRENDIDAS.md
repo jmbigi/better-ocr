@@ -65,13 +65,13 @@
 
 **Lección:** las reglas anti-vibe-code (P1.13–P1.17) son texto: según RepoComplianceBench (arXiv 2607.26819) los agentes cumplen disclosure/verificación (77–100%) pero no prohibiciones — el enforcement real está en la revisión humana y en los checks del verificador local (P1.18 concreta el check de imports/dependencias: existen, usados, seguros, licencias).
 
-## 9. Test `test_chart_cuerpo_demasiado_grande` falla preexistente (2026-08-01)
+## 9. Test `test_chart_cuerpo_demasiado_grande` (2026-08-01)
 
-**Hallazgo:** el test del límite de cuerpo (413) falla de forma consistente en esta máquina (5/5 ejecuciones): `urllib.error.URLError: <urlopen error [Errno 32] Broken pipe>` en lugar de recibir el HTTP 413 esperado.
+**Hallazgo:** el test del límite de cuerpo (413) fallaba de forma consistente (5/5): `urllib.error.URLError: <urlopen error [Errno 32] Broken pipe>` en lugar de recibir el HTTP 413 esperado.
 
-**Causa raíz (carrera TCP):** `chart_server.py` rechaza el cuerpo con `_enviar_json(413, ...)` y cierra la conexión sin drenar el cuerpo (líneas 120-122). El cliente aún está enviando el cuerpo de ~1 MB cuando el socket se cierra → EPIPE en el cliente, que `urllib` reporta como `URLError` y no como `HTTPError(413)`.
+**Causa raíz (carrera TCP):** `chart_server.py` rechazaba el cuerpo con `_enviar_json(413, ...)` y cerraba la conexión sin drenar el cuerpo. El cliente aún estaba enviando el cuerpo de ~1 MB cuando el socket se cerraba → EPIPE en el cliente, que `urllib` reporta como `URLError` y no como `HTTPError(413)`.
 
-**Estado:** preexistente (introducido en `76a4003`, no relacionado con la ronda de P1.13–P1.18, que no tocó código Python). Commit publicado con el fallo documentado por decisión explícita del programador.
+**Solución (commit `93d340c`):** tras responder el 413 se drena el cuerpo de forma acotada (`self.rfile.read(min(largo, MAX_CUERPO))`) antes de cerrar; el cliente termina de enviar y recibe el 413. Suite 21/21 OK y hook pre-commit en verde.
 
-**Pendiente (recomendado para una próxima ronda):** drenar el cuerpo tras el 413 (lectura acotada) para que el cliente reciba la respuesta, o endurecer el test aceptando `URLError` por EPIPE como equivalente al rechazo 413.
+**Lección:** en servidores HTTP propios, responder un error y cerrar sin drenar el cuerpo pendiente convierte el rechazo en una conexión rota para el cliente — drenar acotado tras el error evita el EPIPE sin exponer el servidor a lecturas ilimitadas.
 
