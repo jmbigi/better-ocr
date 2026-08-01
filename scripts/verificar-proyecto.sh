@@ -22,7 +22,7 @@ check() {
 
 echo "== 1. Reglas =="
 check "12 reglas P0 definidas en AGENTS.md" bash -c "test \$(grep -cE '^### P0' AGENTS.md) -eq 12"
-check "12 reglas P1 definidas en AGENTS.md" bash -c "test \$(grep -cE '^### P1' AGENTS.md) -eq 12"
+check "18 reglas P1 definidas en AGENTS.md" bash -c "test \$(grep -cE '^### P1' AGENTS.md) -eq 18"
 check "referencias a rutas docs/ scripts/ y ejemplos/ existen" python3 -c "
 import re, os
 files = ['AGENTS.md', 'README.md', 'CHECKLIST.md', 'docs/GUIA_OCR_VISION.md', 'docs/LECCIONES-APRENDIDAS.md']

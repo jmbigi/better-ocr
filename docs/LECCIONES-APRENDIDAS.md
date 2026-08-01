@@ -55,3 +55,23 @@
 
 **Detalle operativo:** al lanzar `chart_server.py` desde una shell de herramientas que mata el grupo de procesos al expirar, el servidor recibe SIGTERM y cierra limpiamente (comportamiento correcto); para que sobreviva, lanzarlo con `setsid nohup ... & disown`.
 
+## 8. Cláusulas Anti-Vibe-Code (P1.13–P1.18) y publicación en Codeberg (2026-08-01)
+
+**Contexto:** sincronización con el ruleset [better-ai](https://github.com/jmbigi/better-ai) (ronda 33): nuevas reglas P1.13–P1.18 (autoría humana, disclosure `Assisted-by:`, anti-vibe-code, política de IA del anfitrión, humanos se comunican con humanos, revisión de imports antes de commit/push) y publicación del proyecto en Codeberg además de GitHub.
+
+**Solución:** AGENTS.md, CHECKLIST.md y el verificador de ESTE proyecto actualizados (18 reglas P1); sección "Repositorio" en README con GitHub y Codeberg; remote `codeberg` añadido con el alias SSH `jmbigi-codeberg` (misma clave que GitHub, `IdentitiesOnly yes`, huella del host verificada contra docs.codeberg.org).
+
+**Verificación:** verificador local: 15 OK, 1 FALLO conocido (`arbol de trabajo limpio`, esperado con cambios sin commitear) + 1 FALLO preexistente de tests documentado en la sección 9. HEAD idéntico en los tres remotos tras el push.
+
+**Lección:** las reglas anti-vibe-code (P1.13–P1.17) son texto: según RepoComplianceBench (arXiv 2607.26819) los agentes cumplen disclosure/verificación (77–100%) pero no prohibiciones — el enforcement real está en la revisión humana y en los checks del verificador local (P1.18 concreta el check de imports/dependencias: existen, usados, seguros, licencias).
+
+## 9. Test `test_chart_cuerpo_demasiado_grande` falla preexistente (2026-08-01)
+
+**Hallazgo:** el test del límite de cuerpo (413) falla de forma consistente en esta máquina (5/5 ejecuciones): `urllib.error.URLError: <urlopen error [Errno 32] Broken pipe>` en lugar de recibir el HTTP 413 esperado.
+
+**Causa raíz (carrera TCP):** `chart_server.py` rechaza el cuerpo con `_enviar_json(413, ...)` y cierra la conexión sin drenar el cuerpo (líneas 120-122). El cliente aún está enviando el cuerpo de ~1 MB cuando el socket se cierra → EPIPE en el cliente, que `urllib` reporta como `URLError` y no como `HTTPError(413)`.
+
+**Estado:** preexistente (introducido en `76a4003`, no relacionado con la ronda de P1.13–P1.18, que no tocó código Python). Commit publicado con el fallo documentado por decisión explícita del programador.
+
+**Pendiente (recomendado para una próxima ronda):** drenar el cuerpo tras el 413 (lectura acotada) para que el cliente reciba la respuesta, o endurecer el test aceptando `URLError` por EPIPE como equivalente al rechazo 413.
+

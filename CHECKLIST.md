@@ -149,6 +149,21 @@
 - [ ] ¿Si el programador dijo "avanzado", traté la tarea como perfección: sin errores, con precisión al 100% y sin fallos conocidos?
 - [ ] ¿La búsqueda de excelencia no me llevó a saltarme protecciones (P1.9), exceder el alcance (P1.2) ni hacer reescrituras masivas (P1.11)?
 
+## Autoría y uso de IA (P1.13–P1.17)
+
+- [ ] ¿No atribuí co-autoría a modelos de IA (`Co-authored-by: <modelo>`)? ¿El programador es el autor y responsable final? (P1.13)
+- [ ] ¿Declaré el uso de IA en commits/PRs significativos con trailer `Assisted-by:`/`Generated-by:`? (P1.14)
+- [ ] ¿Todo lo generado por IA fue revisado, entendido y probado por el humano antes de entregarlo? (P1.15)
+- [ ] ¿Respeté la política de IA del proyecto anfitrión (ToU, CONTRIBUTING, AI_POLICY, AGENTS.md)? (P1.16)
+- [ ] ¿No respondí revisiones/issues con IA en nombre del programador ni usé IA como árbitro final? (P1.17)
+
+## Imports (P1.18)
+
+- [ ] ¿Revisé todos los imports antes de commitear/pushear: existen (P0.2), se usan de verdad, y su procedencia es segura (P0.8, P1.4)?
+- [ ] ¿Ningún import ejecuta código no confiable al cargarse (side effects, `eval`/`exec` indirectos)?
+- [ ] ¿Las licencias de los imports son compatibles con la licencia del proyecto?
+- [ ] ¿Declaré cada dependencia nueva en el manifiesto del proyecto (requirements.txt, package.json, Cargo.toml...)?
+
 ---
 
 **Resultado**:  TODAS P0 marcadas y con evidencia → tarea verificada.

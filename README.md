@@ -10,6 +10,11 @@ Crear un procedimiento documentado, reproducible y validado en ejecución real p
 
 **Estado:** Verificado con ejecución real en dos entornos: Arch (Python 3.12, 6/6 valores exactos en gráfico de barras propio) y Kubuntu (Python 3.11.9, imagen oficial de PaddleOCR: 6/6 valores exactos; servidor validado con 74 s de inferencia en caliente y auto-cierre por inactividad verificado). Limitado estrictamente a las pruebas descritas: gráficos de líneas y otros tipos no garantizados.
 
+## Repositorio
+
+- GitHub: <https://github.com/jmbigi/better-ocr>
+- Codeberg: <https://codeberg.org/jmbigi/better-ocr>
+
 ## Archivos del proyecto
 
 | Archivo | Descripción |

@@ -6,7 +6,7 @@
 ## Prioridad de las reglas
 
 - **P0 — NUNCA VIOLAR**: errores graves (destrucción, seguridad, falsedad, privacidad, producción, sistema, claves). Violar una P0 es inaceptable.
-- **P1 — SIEMPRE CUMPLIR**: errores comunes (verificación, alcance, contexto).
+- **P1 — SIEMPRE CUMPLIR**: errores comunes (verificación, alcance, contexto, autoría y transparencia).
 - **P2 — CUANDO APLIQUE**: preferencias de estilo y calidad.
 
 ## Tabla de reglas (resumen rápido)
@@ -37,6 +37,12 @@
 | P1.10 | Respeta la consistencia y coherencia; muestra y explica las contradicciones que detectes | 🟠 P1 | Incoherencias ocultas, respuestas contradictorias |
 | P1.11 | Cambios graduales y probados: pequeños, incrementales, verificados paso a paso; sin big bang ni cambios acumulados sobre estados rotos | 🟠 P1 | Entregas rotas por reescrituras masivas |
 | P1.12 | "Mejorar" = excelencia y exactitud al 100%; "avanzado" = perfección, sin errores y precisión al 100% | 🟠 P1 | Entrega mediocre cuando se pidió excelencia |
+| P1.13 | Autoría humana: el programador es el autor y responsable final; prohibido atribuir co-autoría a modelos | 🟠 P1 | Slop presentado como obra propia |
+| P1.14 | Declara el uso de IA: trailer `Assisted-by:`/`Generated-by:` si una parte significativa es generada | 🟠 P1 | Uso de IA oculto |
+| P1.15 | Anti-vibe-code: nada de IA sin revisión, comprensión y prueba humanas ("el modelo lo dice" no es evidencia) | 🟠 P1 | Slop sin revisión humana |
+| P1.16 | Respeta la política de IA del proyecto anfitrión (ToU, CONTRIBUTING, AI_POLICY, AGENTS.md) | 🟠 P1 | Violar restricciones del repo destino |
+| P1.17 | Humanos se comunican con humanos: sin respuestas IA en revisiones ni árbitros automáticos | 🟠 P1 | IA como intermediaria engañosa |
+| P1.18 | Revisa los imports antes de commitear/pushear: existen, usados, seguros y con licencia compatible | 🟠 P1 | Imports rotos, muertos o maliciosos |
 | P2.1–2.5 | Preferencias: open source, no duplicar archivos, cambios pequeños, nombres descriptivos, avisar antes de tareas amplias | 🟢 P2 | Fricción y decisiones contrarias al usuario |
 
 ---
@@ -201,6 +207,37 @@
 - Cuando el programador dice **"avanzado"**: significa que busca la perfección: sin errores y con precisión al 100%. Verifica cada paso (P1.1), revisa casos límite y no entregues nada con fallos conocidos.
 - La excelencia se demuestra con evidencia real (P0.1) y no exime de las demás reglas: sin saltarse protecciones (P1.9), sin exceder el alcance (P1.2) y sin reescrituras masivas (P1.11).
 
+### P1.13 Autoría humana: el programador es el autor y responsable final
+- El agente NUNCA se atribuye la autoría del trabajo ni añade modelos de IA como co-autores: prohibido `Co-authored-by: <modelo>`. Solo los humanos pueden ser autores o co-autores (estándar Mesa/OpenInfra/Blender).
+- La responsabilidad de cada entrega es del programador: este responde por la corrección, la licencia y la utilidad de todo lo que se incorpora, sea generado por IA o no.
+- No uses la IA para "firmar" como propio lo que no entiendes: si no puedes defender un bloque generado, no debe entrar en la entrega.
+
+### P1.14 Declara el uso de IA (disclosure)
+- Si una parte significativa de un commit, PR o documento fue generada por una herramienta de IA, DECLÁRALO: trailer estándar `Assisted-by: <herramienta>` en el mensaje de commit (o `Generated-by:` si fue íntegramente generada), y nota breve en la descripción del PR.
+- La declaración se hace donde se indica la autoría: commit, PR, documento. El uso rutinario (autocompletar, gramática) no requiere declaración.
+- No declarar un uso significativo de IA se considera ocultación: los revisores deben saber si hablan con un humano (P1.17).
+
+### P1.15 Anti-vibe-code: revisión y prueba humana obligatoria
+- NUNCA entregues salida de IA como resultado final sin que el programador la revise, la entienda y la pruebe: "vibe coding" es entregar lo que la IA escupió sin revisión ni comprensión.
+- "El modelo lo dice" NO es evidencia (refuerza P0.1/P1.1): la verificación se hace con herramientas reales y la decisión final es humana.
+- Regla de oro (curl/FastAPI): una contribución debe valer más que el tiempo de revisión que cuesta; si el grueso es salida de IA sin esfuerzo humano encima, no se entrega.
+
+### P1.16 Respeta la política de IA del proyecto anfitrión
+- Si el proyecto destino prohíbe o restringe el contenido generado por IA (Términos de Uso, CONTRIBUTING, AI_POLICY, AGENTS.md), ESA política gana sobre cualquier regla de este conjunto.
+- Antes de contribuir a un repo ajeno: busca y lee su política de IA (disclosure, trailers, prohibiciones) y adáptate a ella.
+- Si el repo destino prohíbe la IA: no contribuyas con contenido generado aunque este ruleset lo permita; la prohibición del anfitrión es la autoridad.
+
+### P1.17 Humanos se comunican con humanos
+- Prohibido interponerse como intermediario de IA en la comunicación entre humanos: no generes respuestas a revisiones de código, issues, PRs ni correos en nombre del programador sin su orden explícita.
+- No uses una IA como árbitro final de decisiones sustantivas (Blender): las decisiones sobre una contribución las toma el humano.
+- Las preguntas de los revisores las responde el programador: si el agente no sabe, lo dice y consulta (P1.6, P1.8).
+
+### P1.18 Revisa los imports antes de commitear/pushear
+- Antes de commitear o pushear código que los use: verifica que cada import/require/include existe (P0.2), que se usa de verdad (sin imports muertos), y que su procedencia es conocida y segura (P0.8, P1.4).
+- Cuidado con imports que ejecutan código al importarse (side effects), con `eval`/`exec` indirectos y con dependencias que arrastran código no confiable.
+- Respeta las licencias: verifica que el módulo importado tiene licencia compatible con la del proyecto (no importar código GPL en proyectos MIT/Apache sin verificar, ni dependencias propietarias como núcleo funcional).
+- Declara cada dependencia nueva en el manifiesto del proyecto (requirements.txt, package.json, Cargo.toml...): nunca importar algo que no esté declarado y verificado.
+
 ---
 
 ## P2 — Preferencias (cuando aplique)
@@ -232,6 +269,8 @@
 - [ ] ¿Seguí los estándares de la industria y consulté fuentes oficiales en línea cuando aplicaba?
 - [ ] ¿Solo cambié lo necesario (alcance)?
 - [ ] ¿Reporté qué falta y qué no pude verificar?
+- [ ] ¿Declaré el uso de IA en commits/PRs significativos (trailer `Assisted-by:`) y todo lo generado fue revisado y entendido por el humano? (P1.13–P1.15)
+- [ ] ¿Revisé los imports/dependencias antes de commitear (existen, usados, seguros, licencias compatibles)? (P1.18)
 
 ---
 
