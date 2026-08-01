@@ -119,6 +119,13 @@ def crear_handler(modelo, estado):
                 return
             if largo > MAX_CUERPO:
                 self._enviar_json(413, {"ok": False, "error": "Cuerpo demasiado grande"})
+                try:
+                    # Drenar el cuerpo (limitado) antes de cerrar: el cliente
+                    # termina de enviar y recibe el 413 en lugar de un
+                    # BrokenPipe/RST (race clasico de HTTP con cuerpos grandes).
+                    self.rfile.read(min(largo, MAX_CUERPO))
+                except Exception:
+                    pass  # cliente ya cerro la conexion
                 return
             try:
                 datos = json.loads(self.rfile.read(largo).decode("utf-8"))
