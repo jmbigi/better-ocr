@@ -75,3 +75,17 @@
 
 **Lección:** en servidores HTTP propios, responder un error y cerrar sin drenar el cuerpo pendiente convierte el rechazo en una conexión rota para el cliente — drenar acotado tras el error evita el EPIPE sin exponer el servidor a lecturas ilimitadas.
 
+## 10. Visión IA local para e2e: PP-OCRv6 + PP-DocBee-2B en GPU (2026-08-01)
+
+**Contexto:** en visorweb2 los tests e2e se complementan con visión IA local (directiva better-ocr): el agente LLM de texto razona sobre los resultados de visión (JSON) en lugar de imaginar la UI.
+
+**Solución (GPU 8 GB, RTX 30x0):**
+- **Migración easyocr → PP-OCRv6** (`PaddleOCR`): mismo contrato `{text, confidence, bbox}`, memoria estimada `{'cpu': 3072, 'gpu': 2048}` MB. Cuellos de botella resueltos: `cu_seqlens` debe ser **int32** (`attention_mask`/`position_ids` con `.astype('int32')`) y redimensionar a **512 px** antes de pasar al DocBee.
+- **LD_LIBRARY_PATH en subprocesos**: los bins del venv (paddle/libs + nvidia/*/lib) deben estar en `LD_LIBRARY_PATH`; **fix cuDNN**: resolver `libcudnn.so.8` como `libcudnn.so.9` para los bins de paddle.
+- **SIGABRT in-process**: cargar PaddleOCR y correr capturas reales en el MISMO proceso del test aborta (cuDNN); los tests de screenshots reales corren en subproceso (`run_cli`) y la verificación GPU se hace vía CLI.
+- **Bug bound-method en unittest**: `self.original = <método de clase>` liga el método a la instancia vía descriptor y contamina al test siguiente; usar `type(self).original`.
+- **Contexto de captura (directiva "saber qué se captura")**: el e2e registra por pantallazo origen (headless viewport), frente/fondo, viewport, imagen y pageUrl; y el entorno del sistema (pantallas vía `xrandr`, escritorios virtuales vía `wmctrl -d`, sesión gráfica) — sin hostnames ni usuarios (P0.9).
+
+**Verificación:** suite 46/46 (test_vision_analyze), e2e 4 estados: OCR real ('Instrument', 'Music Style', 'Siente el nacionalismo'), PP-OCRv6 posicionado (23 ítems) y PP-DocBee-2B respondiendo preguntas sobre la UI real.
+
+**Lección:** la verificación de UI con visión local exige conocer el pipeline completo (resize, dtype, librerías dinámicas, subprocesos) — cada capa (OCR estructural, QA visual, contexto de captura) aporta un nivel de evidencia distinto al LLM de texto.

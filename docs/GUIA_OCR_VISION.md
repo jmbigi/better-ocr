@@ -420,3 +420,54 @@ Las lecciones operativas documentadas en la Sección 7 (una instancia, no thread
 ---
 
 *Fin del documento.*
+
+---
+
+## 10. FLUJO GPU + TESTS E2E CON VISIÓN IA LOCAL (2026-08-01)
+
+Complemento a la guía (que es CPU): verificación de UI con visión local en
+GPU (8 GB) desde un e2e web, tal como se aplica en visorweb2
+(`test-e2e/vision_analyze.py` + `test-e2e/vision-e2e.mjs`).
+
+### 10.1 Pipeline por tarea
+
+| Tarea | Modelo | Uso en e2e |
+|---|---|---|
+| `ocr` / `descripcion` | PP-OCRv6 medium (det+rec) | texto (con posición) de cada pantallazo |
+| `vision` | PP-DocBee-2B | respuesta a una pregunta sobre la captura (QA visual) |
+| `yolo` / `blip` / `opencv` | opcional | objetos / leyenda / métricas (error controlado si el venv no los tiene) |
+
+Contrato JSON: `{text, confidence, bbox}` (OCR) e `{items: [{text, score, poly}]}`
+(descripcion). El LLM de texto recibe estos JSON y razona sobre la UI real.
+
+### 10.2 Cuellos de botella GPU resueltos
+
+1. **PP-DocBee-2B**: `cu_seqlens` debe ser `int32` — castear
+   `attention_mask`/`position_ids` con `.astype('int32')`; redimensionar la
+   imagen a **512 px** antes de la predicción.
+2. **cuDNN**: resolver `libcudnn.so.8` → `libcudnn.so.9` para los bins del
+   venv (los enlaces se colocan dentro del venv, no en el sistema).
+3. **LD_LIBRARY_PATH**: para correr fuera del venv activo (e2e/subprocesos),
+   incluir `paddle/libs` + `nvidia/*/lib` del venv.
+4. **In-process aborts (SIGABRT)**: cargar PaddleOCR y procesar capturas en
+   el mismo proceso de unittest aborta (cuDNN); los tests con capturas reales
+   deben correr en subproceso.
+5. **Memoria**: DocBee 8 GB VRAM es suficiente con las previsiones de la
+   Sección 8 (una instancia, serializado).
+
+### 10.3 Contexto de cada pantallazo (obligatorio)
+
+En el e2e, cada captura registra: **origen** (viewport headless de
+Playwright), **dimensiones** (viewport e imagen), **qué se ve de frente**
+(la app web) y **de fondo** (ninguno en headless), **pageUrl**, y el
+**entorno del sistema** (pantallas vía `xrandr`, escritorios virtuales vía
+`wmctrl -d`, sesión gráfica) — sin hostnames ni datos personales (P0.9).
+Con múltiples escritorios virtuales, las pruebas se hacen en un escritorio
+limpio y aislado; las capturas headless no tocan el escritorio del usuario.
+
+### 10.4 Verificación
+
+- Suite de tests del analizador: `paddle-venv/bin/python -m unittest test_vision_analyze` (46/46 en visorweb2).
+- E2e: `node vision-e2e.mjs` (OCR estructural + descripcion + QA visual por estado), con `VISION_E2E_SKIP_HEAVY=1` para un pase rápido.
+
+*Fin del documento.*
