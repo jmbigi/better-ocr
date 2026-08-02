@@ -89,3 +89,17 @@
 **Verificación:** suite 46/46 (test_vision_analyze), e2e 4 estados: OCR real ('Instrument', 'Music Style', 'Siente el nacionalismo'), PP-OCRv6 posicionado (23 ítems) y PP-DocBee-2B respondiendo preguntas sobre la UI real.
 
 **Lección:** la verificación de UI con visión local exige conocer el pipeline completo (resize, dtype, librerías dinámicas, subprocesos) — cada capa (OCR estructural, QA visual, contexto de captura) aporta un nivel de evidencia distinto al LLM de texto.
+
+## 11. Revisión de robustez: 413/keep-alive, validación de imagen y mensajes 400 (2026-08-02)
+
+**Contexto:** revisión del proyecto con reglas better-ai. Se investigó una hipótesis y se aplicaron dos mejoras con evidencia.
+
+**Hallazgo 1 — el 413 NO es un bug de keep-alive (hipótesis refutada con evidencia):** se sospechó que tras el 413 el cuerpo residual sin drenar corrompería la siguiente petición de una conexión HTTP/1.1 keep-alive. Verificado con socket crudo y handler instrumentado (request line + `close_connection`): `BaseHTTPRequestHandler.protocol_version` por defecto es **HTTP/1.0**, y `parse_request` solo mantiene la conexión si `version_number >= (1,1) AND protocol_version >= "HTTP/1.1"` — como el servidor responde HTTP/1.0, **cierra la conexión tras CADA respuesta** y el residuo muere con el socket. El test con `http.client` que "sí" recibía 200 en la 2ª petición era engañoso: http.client reabre una conexión nueva al ver la respuesta HTTP/1.0. El drenado acotado del 413 (commit `93d340c`) es correcto y suficiente.
+
+**Advertencia para el futuro:** si alguien activa `protocol_version = "HTTP/1.1"` en `chart_server.py`, el 413 quedará vulnerable: el cuerpo residual corrompería la request line de la siguiente petición de la misma conexión. En ese caso habría que añadir `Connection: close` a la respuesta 413 (o drenar el cuerpo completo).
+
+**Mejora 1 — `validar_imagen` ahora verifica la firma mágica:** antes solo comprobaba `os.path.exists`, así que un directorio (`ejemplos`) o un `.txt` pasaban la validación y obligaban a cargar el modelo (3-5 min, 4.8 GB) para fallar después. Ahora `es_archivo_imagen()` lee los 16 primeros bytes y acepta solo firmas reales (PNG, JPEG, BMP, GIF, WebP, TIFF), con `ValueError` claro en caso contrario.
+
+**Mejora 2 — el 400 del servidor distingue JSON inválido de clave faltante:** antes `{"otra": 1}` (JSON válido) devolvía `"JSON invalido: 'image'"`, un mensaje falso. Ahora: `"Se espera un objeto JSON con la clave 'image'"`; también rechaza `"image"` que no sea string (evita un 500 por un error del cliente).
+
+**Verificación:** 27/27 tests (`python3 -m unittest discover -s tests -v`), sintaxis OK, verificador local 20/20 OK.

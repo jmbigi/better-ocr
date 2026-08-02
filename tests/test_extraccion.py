@@ -9,7 +9,9 @@ No requiere paddleocr (se prueba con modelos simulados); solo pandas.
 import contextlib
 import io
 import json
+import os
 import sys
+import tempfile
 import threading
 import time
 import unittest
@@ -22,7 +24,13 @@ import pandas as pd
 sys.path.insert(0, ".")
 
 import chart_server
-from extractor_final import es_fila_separadora, markdown_a_df, obtener_markdown, validar_imagen
+from extractor_final import (
+    es_archivo_imagen,
+    es_fila_separadora,
+    markdown_a_df,
+    obtener_markdown,
+    validar_imagen,
+)
 
 
 class TestFilaSeparadora(unittest.TestCase):
@@ -93,6 +101,35 @@ class TestValidarImagen(unittest.TestCase):
 
     def test_imagen_existente(self):
         self.assertEqual(validar_imagen("ejemplos/grafico_demo.png"), "ejemplos/grafico_demo.png")
+
+    def test_directorio_no_es_imagen(self):
+        # Un directorio "existe" pero no es una imagen: no debe pasar la validacion
+        # (cargar el modelo para nada costaria 3-5 min y 4.8 GB de RAM).
+        with self.assertRaises(ValueError):
+            validar_imagen("ejemplos")
+
+    def test_archivo_no_imagen(self):
+        with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as f:
+            f.write(b"esto no es una imagen, solo texto")
+            ruta = f.name
+        try:
+            with self.assertRaises(ValueError):
+                validar_imagen(ruta)
+        finally:
+            os.unlink(ruta)
+
+    def test_archivo_vacio_no_es_imagen(self):
+        with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as f:
+            ruta = f.name
+        try:
+            with self.assertRaises(ValueError):
+                validar_imagen(ruta)
+        finally:
+            os.unlink(ruta)
+
+    def test_firma_magica_png(self):
+        self.assertTrue(es_archivo_imagen("ejemplos/grafico_demo.png"))
+        self.assertFalse(es_archivo_imagen("requirements.txt"))
 
 
 class ResultadoFalso:
@@ -193,6 +230,18 @@ class TestChartServer(unittest.TestCase):
 
     def test_chart_json_invalido(self):
         codigo, cuerpo = self._req("/chart", {"mal": "json"})
+        self.assertEqual(codigo, 400)
+
+    def test_chart_json_valido_sin_clave_image(self):
+        # JSON valido pero sin la clave esperada: 400 con mensaje que lo distingue
+        # del JSON malformado (no debe decir "JSON invalido").
+        codigo, cuerpo = self._req("/chart", {"otra_clave": "x"})
+        self.assertEqual(codigo, 400)
+        self.assertNotIn("JSON invalido", cuerpo["error"])
+        self.assertIn("image", cuerpo["error"])
+
+    def test_chart_image_no_string(self):
+        codigo, _ = self._req("/chart", {"image": 12345})
         self.assertEqual(codigo, 400)
 
     def test_chart_sin_cuerpo(self):

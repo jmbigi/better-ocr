@@ -17,15 +17,44 @@ from io import StringIO
 import pandas as pd
 
 
+def es_archivo_imagen(ruta: str) -> bool:
+    """True si el archivo tiene una firma mágica de imagen conocida.
+
+    Formatos soportados por PaddleOCR: PNG, JPEG, BMP, GIF, WebP y TIFF.
+    Se leen solo los 16 primeros bytes: barato y sin dependencias.
+    Un directorio o un archivo de texto NO es una imagen aunque exista.
+    """
+    try:
+        with open(ruta, "rb") as f:
+            cabecera = f.read(16)
+    except OSError:  # incluye IsADirectoryError
+        return False
+    return (
+        cabecera.startswith(b"\x89PNG\r\n\x1a\n")       # PNG
+        or cabecera.startswith(b"\xff\xd8\xff")          # JPEG
+        or cabecera.startswith(b"GIF87a") or cabecera.startswith(b"GIF89a")
+        or cabecera.startswith(b"BM")                    # BMP
+        or (cabecera[:4] == b"RIFF" and cabecera[8:12] == b"WEBP")
+        or cabecera.startswith(b"II*\x00")               # TIFF little-endian
+        or cabecera.startswith(b"MM\x00*")               # TIFF big-endian
+    )
+
+
 def validar_imagen(imagen: str) -> str:
-    """Valida que la ruta de la imagen exista, con mensaje claro.
+    """Valida que la ruta de la imagen exista y sea un archivo de imagen.
 
     Se ejecuta ANTES de cargar el modelo (que tarda 3-5 min y ocupa 4.8 GB
-    de RAM): un typo en la ruta no debe desperdiciar la carga del modelo.
+    de RAM): un typo en la ruta o un archivo que no es imagen no debe
+    desperdiciar la carga del modelo.
     """
     if not os.path.exists(imagen):
         raise FileNotFoundError(
             f"La imagen no existe: '{imagen}'. Revisa la ruta antes de ejecutar."
+        )
+    if not es_archivo_imagen(imagen):
+        raise ValueError(
+            f"El archivo '{imagen}' existe pero no parece una imagen "
+            "(se esperan PNG, JPEG, BMP, GIF, WebP o TIFF)."
         )
     return imagen
 

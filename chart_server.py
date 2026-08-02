@@ -129,10 +129,18 @@ def crear_handler(modelo, estado):
                 return
             try:
                 datos = json.loads(self.rfile.read(largo).decode("utf-8"))
-                imagen = datos["image"]
-            except Exception as exc:  # JSON invalido o falta la clave
+            except Exception as exc:  # JSON invalido
                 self._enviar_json(400, {"ok": False, "error": f"JSON invalido: {exc}"})
                 return
+            if not isinstance(datos, dict) or not isinstance(datos.get("image"), str):
+                # JSON valido pero sin la clave esperada: mensaje distinto del
+                # JSON malformado, para que la API no mienta sobre la causa.
+                self._enviar_json(400, {
+                    "ok": False,
+                    "error": "Se espera un objeto JSON con la clave 'image' (ruta o URL de la imagen)",
+                })
+                return
+            imagen = datos["image"]
 
             # Marcar actividad y bloquear el cierre por inactividad
             estado["ocupado"] = True
