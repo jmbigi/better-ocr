@@ -255,7 +255,7 @@ def main() -> None:
     parser = argparse.ArgumentParser(description="Bateria 360° VLM (docbee vs qwen2.5vl)")
     parser.add_argument("--motor", choices=["docbee", "ollama", "ambos"], default="ambos")
     parser.add_argument("--host", default="127.0.0.1", help="host de ollama (default: 127.0.0.1)")
-    parser.add_argument("--modelo", default="qwen2.5vl:3b", help="modelo ollama (default: qwen2.5vl:3b)")
+    parser.add_argument("--modelo", default="gemma3:4b", help="modelo ollama (default: qwen2.5vl:3b)")
     parser.add_argument("--device", default="cuda", help="device para docbee (default: cuda)")
     parser.add_argument("--solo", default=None, help="id de test unico (ej. valores_demo)")
     args = parser.parse_args()
