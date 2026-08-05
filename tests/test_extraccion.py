@@ -278,7 +278,27 @@ class TestChartServer(unittest.TestCase):
         codigo, _ = self._req("/otra")
         self.assertEqual(codigo, 404)
 
+    def test_vision_modo_invalido(self):
+        codigo, cuerpo = self._req("/vision", {"image": "x.png", "modo": "nada"})
+        self.assertEqual(codigo, 400)
+        self.assertIn("modo invalido", cuerpo["error"])
 
+    def test_vision_json_invalido_reutiliza_validacion(self):
+        codigo, cuerpo = self._req("/vision", {"mal": "json"})
+        self.assertEqual(codigo, 400)
+        self.assertIn("clave 'image'", cuerpo["error"])
+
+    def test_vision_ok_con_ejecutar_mockeado(self):
+        import unittest.mock as mock
+
+        import vision
+
+        falso = {"ok": True, "detecciones": [{"clase": "person", "score": 0.9}]}
+        with mock.patch.object(vision, "ejecutar", return_value=falso) as ejecutar_falso:
+            codigo, cuerpo = self._req("/vision", {"image": "foto.png", "modo": "objetos"})
+            ejecutar_falso.assert_called_once_with("foto.png", "objetos", False)
+        self.assertEqual(codigo, 200)
+        self.assertTrue(cuerpo["ok"])
 class TestDFAMarkdown(unittest.TestCase):
     def test_celda_multilinea_no_rompe_tabla(self):
         df = pd.DataFrame({"A": ["x\ny"], "B": [1]})

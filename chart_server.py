@@ -96,29 +96,24 @@ def crear_handler(modelo, estado):
 
         def do_GET(self):
             if self.path != "/health":
-                self._enviar_json(404, {"ok": False, "error": "Solo GET /health o POST /chart"})
+                self._enviar_json(404, {"ok": False, "error": "Solo GET /health o POST /chart o POST /vision"})
                 return
             self._enviar_json(200, {
                 "status": "ok",
                 "modelo": "PP-Chart2Table",
+                "modos": ["auto", "texto", "graficos", "doc", "objetos", "humano"],
                 "uptime_s": round(time.time() - estado["inicio"]),
             })
 
-        def do_POST(self):
-            if self.path != "/chart":
-                self._enviar_json(404, {"ok": False, "error": "Solo GET /health o POST /chart"})
-                return
-
+        def _recibir_json(self):
+            """Lee y valida el cuerpo JSON. Devuelve (None, datos) o (codigo, error)."""
             try:
                 largo = int(self.headers.get("Content-Length", 0))
             except ValueError:
-                self._enviar_json(400, {"ok": False, "error": "Content-Length invalida"})
-                return
+                return 400, "Content-Length invalida"
             if largo <= 0:
-                self._enviar_json(400, {"ok": False, "error": "Cuerpo JSON vacio"})
-                return
+                return 400, "Cuerpo JSON vacio"
             if largo > MAX_CUERPO:
-                self._enviar_json(413, {"ok": False, "error": "Cuerpo demasiado grande"})
                 try:
                     # Drenar el cuerpo (limitado) antes de cerrar: el cliente
                     # termina de enviar y recibe el 413 en lugar de un
@@ -126,29 +121,54 @@ def crear_handler(modelo, estado):
                     self.rfile.read(min(largo, MAX_CUERPO))
                 except Exception:
                     pass  # cliente ya cerro la conexion
-                return
+                return 413, "Cuerpo demasiado grande"
             try:
                 datos = json.loads(self.rfile.read(largo).decode("utf-8"))
             except Exception as exc:  # JSON invalido
-                self._enviar_json(400, {"ok": False, "error": f"JSON invalido: {exc}"})
-                return
+                return 400, f"JSON invalido: {exc}"
             if not isinstance(datos, dict) or not isinstance(datos.get("image"), str):
                 # JSON valido pero sin la clave esperada: mensaje distinto del
                 # JSON malformado, para que la API no mienta sobre la causa.
+                return 400, "Se espera un objeto JSON con la clave 'image' (ruta o URL de la imagen)"
+            return None, datos
+
+        def _procesar_vision(self, datos):
+            """POST /vision: enruta al modo indicado (import perezoso de
+            vision.py: evita el ciclo chart_server -> vision -> chart_server)."""
+            import vision
+
+            modo = datos.get("modo", "auto")
+            if modo not in vision.MODOS:
                 self._enviar_json(400, {
                     "ok": False,
-                    "error": "Se espera un objeto JSON con la clave 'image' (ruta o URL de la imagen)",
+                    "error": f"modo invalido: {modo} (validos: {vision.MODOS})",
                 })
                 return
-            imagen = datos["image"]
+            con_fallback = bool(datos.get("fallback", False))
+            LOG.info("Vision modo=%s para: %s", modo, datos["image"])
+            resultado = vision.ejecutar(datos["image"], modo, con_fallback)
+            self._enviar_json(200, resultado)
+
+        def do_POST(self):
+            if self.path not in ("/chart", "/vision"):
+                self._enviar_json(404, {"ok": False, "error": "Solo GET /health o POST /chart o POST /vision"})
+                return
+
+            error, datos = self._recibir_json()
+            if error:
+                self._enviar_json(error, {"ok": False, "error": datos})
+                return
 
             # Marcar actividad y bloquear el cierre por inactividad
             estado["ocupado"] = True
             estado["ultima_actividad"] = time.time()
             try:
-                LOG.info("Inferencia iniciada para: %s", imagen)
+                if self.path == "/vision":
+                    self._procesar_vision(datos)
+                    return
+                LOG.info("Inferencia iniciada para: %s", datos["image"])
                 t0 = time.time()
-                resultados = modelo.predict({"image": imagen})
+                resultados = modelo.predict({"image": datos["image"]})
                 if not resultados:
                     raise RuntimeError("No se obtuvo ningun resultado del modelo.")
                 df = markdown_a_df(obtener_markdown(resultados[0]))

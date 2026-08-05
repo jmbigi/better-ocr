@@ -52,6 +52,8 @@ check "sin referencias obsoletas en AGENTS.md/README.md (master, GitHub Actions,
 echo "== 2. Sintaxis y pruebas =="
 check "sintaxis: extractor_final.py" python3 -m py_compile extractor_final.py
 check "sintaxis: chart_server.py" python3 -m py_compile chart_server.py
+check "sintaxis: ocr_rapido.py" python3 -m py_compile ocr_rapido.py
+check "sintaxis: vision.py" python3 -m py_compile vision.py
 check "tests unitarios (stdlib + pandas)" python3 -m unittest discover -s tests -q
 
 echo "== 3. Config =="

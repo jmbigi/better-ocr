@@ -103,3 +103,44 @@
 **Mejora 2 — el 400 del servidor distingue JSON inválido de clave faltante:** antes `{"otra": 1}` (JSON válido) devolvía `"JSON invalido: 'image'"`, un mensaje falso. Ahora: `"Se espera un objeto JSON con la clave 'image'"`; también rechaza `"image"` que no sea string (evita un 500 por un error del cliente).
 
 **Verificación:** 27/27 tests (`python3 -m unittest discover -s tests -v`), sintaxis OK, verificador local 20/20 OK.
+
+## 12. Visión multi-modo: cascada PP-OCRv6, benchmark de motores y límites de la máquina (2026-08-05)
+
+**Contexto:** extensión del proyecto a "visión IA": modos texto/gráficos/doc/objetos con CLI (`vision.py`) y servidor (`POST /vision`), más una ruta rápida de gráficos (`ocr_rapido.py`) que compite con el VLM ChartParsing.
+
+**Benchmark real (imagen oficial chart_parsing_02, 1 ejecución por motor, subprocesos aislados):**
+
+| Motor | Carga | Inferencia | RAM pico | Exactitud |
+|---|---|---|---|---|
+| `ChartParsing` (VLM, base) | 147 s | 179 s | 5.2 GB | 18/18 celdas |
+| `PP-StructureV3` (con chart) | 73 s | 266 s | 6.4 GB | 12/18 (beneficios 0/6: peso PP-Chart2Table cargado con `embed_tokens` sin inicializar) |
+| `PP-OCRv6` (texto) | 16 s | 38 s | 1.0 GB | 12/12 valores + 6/6 años |
+| `PP-OCRv5` (texto) | 7 s | 51 s | 2.7 GB | 12/12 + 6/6 |
+
+**Hallazgo 1 — bug paddlepaddle 3.3.1 (PIR + oneDNN):** PP-OCRv6/v5, PP-StructureV3 y RT-DETR fallan al cargar con `NotImplementedError: ConvertPirAttribute2RuntimeAttribute not support [pir::ArrayAttribute<pir::DoubleAttribute>]`. Confirmado por mantenedores como bug del framework (issue PaddlePaddle/PaddleOCR#18162); workaround oficial: desactivar oneDNN. Soluciones aplicadas y verificadas: `PaddleOCR(enable_mkldnn=False)`, `PPStructureV3(enable_mkldnn=False)`, y para PaddleX genérico (RT-DETR) `PADDLE_PDX_ENABLE_MKLDNN_BYDEFAULT=0` **antes** del import (el flag se lee al importar paddlex; `run_mode`/`enable_mkldnn` por kwargs NO llegan al runner, verificado). Los flags `FLAGS_use_mkldnn=0` y `FLAGS_enable_pir_api=0` NO funcionan aquí.
+
+**Hallazgo 2 — `PPStructureV3.predict` no acepta dict:** solo `str`/`ndarray`; con `{"image": ruta}` devuelve lista vacía sin error (`IndexError` al indexar). El resultado JSON expone la estructura `res.layout_det_res.boxes` (no `layout`).
+
+**Hallazgo 3 — OCR doble (imagen completa + banda inferior):** PP-OCRv6 pierde las etiquetas del eje X cuando las etiquetas de valores negativos se solapan con ellas; un segundo OCR del 14% inferior (crop) las recupera. Fusión con regla: conflicto por IoU gana la lectura de mayor score (con epsilon 1e-4: `1.0 > 0.999991` es ruido de punto flotante y NO debe reemplazar); duplicado por texto idéntico con centros cercanos se descarta. La banda NO debe ser demasiado estrecha (corta glifos) ni demasiado ancha (corrompe signos de valores).
+
+**Hallazgo 4 — el gate de plausibilidad es quien evita la pérdida silenciosa de datos:** un año sin valor leído (`-2.9` en bar_2series) o número inconsistente de columnas entre años hace FALLAR la ruta rápida y cae al VLM (18/18). El fast path gana tiempo/RAM solo cuando está completo; nunca devuelve tablas incompletas.
+
+**Hallazgo 5 — generación de gráficos de prueba (matplotlib):** el OCR no lee texto pequeño (xtick 10pt a dpi 150 = 0 detecciones). Además: offset positivo en etiquetas de valores negativos las cruza con la línea del eje (el OCR lee la caja vacía, score 0.0) y con las etiquetas de años (se fusionan en una detección). Solución: `figsize` generoso, xtick ≥ 14pt, valores negativos etiquetados DEBAJO de la barra con offset −2, margen inferior amplio. En el fast path, los ticks del eje Y quedan a ≥0.5×espaciado de la primera categoría y las etiquetas reales a ≤0.3×: ventana de emparejado 0.5×espaciado discrimina ambos (verificado en matplotlib y plotly).
+
+**Hallazgo 6 — esta máquina tiene 7 GB de RAM (no 16 como la lección 7):** ChartParsing (5.2 GB) cabe justo; PP-StructureV3 con chart (6.4 GB) roza OOM; layout-only (4.5 GB) cabe. PaddleOCR-VL 0.9B (4.7–9 GB) NO cabe: los modos pinturas/dibujos/descripción quedan fuera en este hardware y requieren GPU o más RAM. Modos validados aquí: texto (PP-OCRv6), graficos (cascada), doc (layout-only, 323 s), objetos (RT-DETR-L, 18 s, 857 MB, 7 detecciones en foto real de frutas).
+
+**Verificación:** 56/56 tests, e2e del servidor `/vision` real (35 líneas de la tarjeta de embarque en 61 s), informe `/var/tmp/better-ocr-bench/reporte.json`.
+
+**Lección:** ante un bug de framework, verificar en la fuente (issues oficiales) y aplicar el workaround oficial; los parámetros de librerías de alto nivel (PaddleX) a veces no propagan lo que prometen — hay que leer el código de flags del paquete instalado. Y medir RAM real por modo antes de prometer "visión total" en una máquina concreta.
+
+## 13. deepseek-ocr.rs (Rust) con PaddleOCR-VL q4k: funciona y es exacto, pero lento (2026-08-05)
+
+**Contexto:** prueba mínima de la alternativa en Rust (sin Python) en esta máquina (7.7 GB RAM, 9 GiB swap añadido por el programador como root, CPU).
+
+**Build:** `cargo build --release -p deepseek-ocr-cli` con rustup (perfil minimal, instalado en `~/.cargo`). **Dos fallos de build con causas distintas:** (1) `Bus error (señal 7)` del linker (rust-lld/LLVM): el repo se clonó en `/tmp` que es **tmpfs de 3.9 GB** — el enlazado llena tmpfs y muere; solución: `CARGO_TARGET_DIR` y `TMPDIR` en disco (`/home/admin/dsocr-target`). (2) `ring` build script falló una vez por presión de disco mientras el programador creaba `/swapfile2` (4 GiB): transitorio, recompilando pasó.
+
+**Resultado real (grafico_demo.png, `--model paddleocr-vl-q4k --device cpu --max-new-tokens 400`):** 12/12 valores + 6/6 años **exactos** (q4k NO degradó los dígitos en este caso, contrariamente a la predicción inicial). Carga del modelo 8.2 s. **~1200 s de inferencia** (prefill visión 0.43 tok/s en 477 tokens = 1099 s; generation 134 tokens a 1.4 tok/s = 96 s). Sin OOM gracias al swap (9 GiB). RAM real no medida (el monitor VmRSS leyó el PID del wrapper, no el proceso — monitoreo no fiable con `&` dentro del shell; medir con subproceso directo).
+
+**Comparativa final en este gráfico:** PP-OCRv6 fast path 57 s/1 GB (gate rechaza), ChartParsing 333 s/5.2 GB/18-18, deepseek-ocr.rs q4k ~1200 s/~4-6 GB/12-12, PP-StructureV3 345 s/6.4 GB/12-18.
+
+**Lección:** la alternativa Rust es viable y exacta, pero en CPU es ~4× más lenta que el VLM Python y ~20× que PP-OCRv6: solo para batch sin prisa o entornos sin pila Python. Y un swapfile nuevo con `mkswap -U clear --size 4G --file` + `pri=10` en fstab (verificado con `findmnt --verify`: 0 errores) es seguro si no se toca el swap existente.
