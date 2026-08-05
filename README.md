@@ -35,6 +35,7 @@ Crear un procedimiento documentado, reproducible y validado en ejecución real p
 | `scripts/benchmark_ocr.py` | Benchmark de motores (ChartParsing / PP-StructureV3 / PP-OCRv6 / PP-OCRv5) sobre la misma imagen: tiempo de carga, inferencia, RAM y puntuación contra la referencia oficial. |
 | `scripts/generar_charts.py` | Genera gráficos de prueba con datos CONOCIDOS (matplotlib, seaborn, plotly) + CSV de referencia como ground truth. |
 | `scripts/validar_cascada.py` | Valida la ruta rápida (ocr_rapido) contra los CSV de referencia de `ejemplos/test_charts/`. |
+| `scripts/bateria_360.py` | **Batería 360°:** compara VLM locales (docbee / ollama) en 6 dimensiones (QA UI, interpretación, valores, objetos, descripción, documento) con las mismas imágenes y prompts; scoring automático + rúbrica humana. |
 | `scripts/hooks/pre-commit` | Hook git local que ejecuta la verificación antes de cada commit (instalación: `cp scripts/hooks/pre-commit .git/hooks/pre-commit`). |
 | `docs/GUIA_OCR_VISION.md` | **Documento general reutilizable** (se puede pegar en otros proyectos). Incluye Chart OCR, Text OCR y AI Vision con PaddleOCR. |
 | `docs/LECCIONES-APRENDIDAS.md` | Memoria del proyecto: fallos, hallazgos y soluciones (referenciada desde `AGENTS.md`). |
@@ -110,6 +111,8 @@ python3 -m unittest discover -s tests -v
 - **Bug paddlepaddle 3.3.1 (PIR + oneDNN):** PP-OCRv6, PP-StructureV3 y RT-DETR fallan con `ConvertPirAttribute2RuntimeAttribute` si usan mkldnn. Workarounds aplicados en el código: `enable_mkldnn=False` (PaddleOCR/PPStructureV3) y `PADDLE_PDX_ENABLE_MKLDNN_BYDEFAULT=0` (RT-DETR). Detalle y fuentes: issue PaddlePaddle/PaddleOCR#18162.
 - **Cascada de gráficos:** la ruta rápida (PP-OCRv6 + geometría) solo es fiable con categorías tipo año consecutivas y etiquetas de valor legibles; el gate la rechaza y cae al VLM ChartParsing en cualquier otra situación (líneas, pastel, scatter, etiquetas solapadas).
 - **Límites de "visión 360°":** pinturas/dibujos/descripción de escenas requieren un VLM de captioning (PaddleOCR-VL 0.9B ≈ 4.7-9 GB) — fuera del alcance de esta máquina de 7 GB. Objetos reales y personas: RT-DETR-L (validado, ~0.9 GB).
+- **VLM locales en CPU (batería 360°):** gemma3:4b es el punto dulce (12/12 valores en ~150 s, RAM segura); qwen2.5vl:7b mejora la descripción de escenas modestamente pero es 2.7× más lento y puede dejar la RAM del host crítica (descargar con `keep_alive=0` tras cada uso). Los modelos comerciales de referencia superan a ambos locales en granularidad descriptiva.
+- **Imágenes de prueba externas:** contenido con derechos de terceros → solo en directorios temporales, nunca en el repo.
 
 ## Documentación oficial de referencia
 

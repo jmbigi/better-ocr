@@ -167,3 +167,38 @@
 **Hallazgo 3 — scatter no es soportado por PP-Chart2Table:** el modelo (entrenado para barra/línea/pastel) inventa datos plausibles en lugar de devolver los labels reales de los puntos. Peor que un error: es una falsa tabla. Para scatter, la lectura útil es solo el modo texto (PP-OCRv6 lee los labels `x,y`), sin reconstrucción de tabla.
 
 **Verificación:** 59/59 tests, matriz completa con corridas reales (2× fast path + 5× fallback VLM + 1 rechazo documentado).
+
+## 15. Batería 360° VLM en CPU: ollama, gemma3:4b y qwen2.5vl (2026-08-05)
+
+**Contexto:** comparación empírica de VLM locales con el harness `scripts/bateria_360.py` (6 dimensiones: QA de UI, interpretación, valores, objetos, descripción, documento) en un servidor CPU con 7.7 GB de RAM.
+
+**Instalación de ollama sin pipes (P0.8):** el instalador oficial usa `curl | sh` (prohibido por el guardarraíl); alternativa verificada: descarga del tarball oficial desde el release de GitHub (`ollama-linux-amd64.tar.zst`, ~1.35 GB) y extracción local. El servidor se lanza a mano en `127.0.0.1:11434`.
+
+**Resultados medidos (misma batería, temperatura 0):**
+
+| Test | qwen2.5vl:3b | gemma3:4b | qwen2.5vl:7b |
+|---|---|---|---|
+| valores (demo oficial) | 12/12 (224 s) | 12/12 (150 s) | 12/12 (399 s) |
+| valores (pie) | — | 5/5 (130 s) | 5/5 (585 s) |
+| objetos (frutas) | 3/4 | 3/4 | 3/4 |
+| documento | — | 1/2 (371 s) | 1/2 (324 s) |
+
+**Hallazgo 1 — empate técnico en la batería objetiva:** los tres modelos puntúan igual (12/12, 3/4, 1/2); la diferencia es tiempo y RAM. gemma3:4b es el punto dulce de la máquina (2.5-4.5× más rápido que el 7b).
+
+**Hallazgo 2 — qwen2.5vl:7b acorrala la RAM del servidor:** carga 5.8 GB; al terminar dejó 150 MB libres (riesgo real para los servicios del host). Solución verificada: descargar el modelo tras cada uso con la API `keep_alive=0` (`POST /api/generate {"model": ..., "keep_alive": 0}`). Nunca dejar modelos grandes cargados en un servidor con servicios productivos.
+
+**Hallazgo 3 — el monitor del servidor marcaba "Status: error" por disco al 91%** (umbral >90), no por servicios: `ollama`/`vsftpd` "not-found" son informativos y no cuentan para el estado. La clave `services_error` en realidad significaba "cualquier error": renombrada a `any_error` (nadie la consumía; verificado). Con disco a ~63% el monitor volvió a `ok`.
+
+**Verificación:** 66/66 tests, corridas reales documentadas; salidas crudas en `/var/tmp/bateria360/`.
+
+## 16. Descripción de imágenes reales: el 7b mejora, pero modestamente (2026-08-05)
+
+**Contexto:** prueba diminuta (2 fotografías reales de web pública, sin datos personales) con la misma pregunta de descripción a gemma3:4b, qwen2.5vl:7b y un modelo comercial de referencia.
+
+**Imagen 1 (parque con plataformas circulares, junto a cancha cercada):** el 7b acertó el contexto que gemma perdió — autobús claro, casas urbanas al fondo, portería tras la red — y coincidió con la referencia comercial en 4 detalles de contexto; gemma atribuyó el naranja del autobús a "marcas del campo". Ambos fallaron las máquinas de gimnasio biosaludable y el detalle de un niño con camiseta blanca/pantalón rojo (solo la referencia comercial lo captó).
+
+**Imagen 2 (siete niños corriendo tomados de la mano por un camino de tierra):** ambos contaron 7, vieron manos, camino y bosque; el 7b fue más específico en colores reales (rosa, mezclilla) frente al genérico "blues/whites" de gemma; la referencia comercial añadió el desglose completo de atuendos por niño (nivel que ningún modelo local alcanza).
+
+**Conclusión (n=2):** el 7b mejora la calidad descriptiva de forma real pero modesta — contexto de escena y especificidad de color — y nunca pierde frente a gemma; ambos locales quedan por debajo de la referencia comercial en granularidad. Las imágenes externas no se commitean al repo (contenido con derechos; solo en directorio temporal).
+
+**Lección:** para decidir entre modelos hay que probar con contenido real y una referencia independiente; la batería objetiva puede empatar mientras la calidad descriptiva difiere — por eso la batería 360° incluye dimensiones libres con rúbrica humana.
