@@ -208,9 +208,42 @@ print(json.dumps({{"texto": texto.strip(), "tiempo_s": round(time.monotonic()-t0
                 "stderr": proc.stderr[-300:]}
 
 
+def _garantizar_ollama(host: str, binario: str | None = None) -> tuple[bool, str]:
+    """Arranca el servidor ollama bajo demanda si no responde (no servicio
+    permanente). Devuelve (ok, detalle)."""
+    import socket
+
+    try:
+        with socket.create_connection((host, 11434), timeout=2):
+            return True, "ollama ya activo"
+    except OSError:
+        pass
+    binario = binario or os.path.expanduser("~/ollama/bin/ollama")
+    if not os.path.exists(binario):
+        return False, f"no se encuentra el binario de ollama: {binario}"
+    import subprocess
+    try:
+        subprocess.Popen([binario, "serve"],
+                         stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                         start_new_session=True)
+    except OSError as e:
+        return False, f"no se pudo arrancar ollama: {e}"
+    for _ in range(30):
+        try:
+            with socket.create_connection((host, 11434), timeout=2):
+                return True, "ollama arrancado bajo demanda"
+        except OSError:
+            time.sleep(2)
+    return False, "ollama no respondio en 60 s"
+
+
 def run_ollama(imagen: str, prompt: str, host: str, modelo="qwen2.5vl:3b",
                timeout_s=1800) -> dict:
-    """API /api/generate de ollama (temperatura 0 = determinista)."""
+    """API /api/generate de ollama (temperatura 0 = determinista).
+    Arranca el servidor bajo demanda si no esta escuchando."""
+    ok, detalle = _garantizar_ollama(host)
+    if not ok:
+        return {"ok": False, "error": detalle}
     with open(imagen, "rb") as f:
         b64 = base64.b64encode(f.read()).decode()
     cuerpo = json.dumps({
