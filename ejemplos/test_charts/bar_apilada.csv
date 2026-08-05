@@ -1,5 +1,4 @@
-trimestre,PartA,PartB,PartC
-Q1,20,10,5
-Q2,25,12,7
-Q3,22,15,6
-Q4,28,11,9
+parte,Q1,Q2,Q3,Q4
+Part A,20,25,22,28
+Part B,10,12,15,11
+Part C,5,7,6,9

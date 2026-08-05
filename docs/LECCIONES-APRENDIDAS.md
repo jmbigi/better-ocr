@@ -144,3 +144,26 @@
 **Comparativa final en este gráfico:** PP-OCRv6 fast path 57 s/1 GB (gate rechaza), ChartParsing 333 s/5.2 GB/18-18, deepseek-ocr.rs q4k ~1200 s/~4-6 GB/12-12, PP-StructureV3 345 s/6.4 GB/12-18.
 
 **Lección:** la alternativa Rust es viable y exacta, pero en CPU es ~4× más lenta que el VLM Python y ~20× que PP-OCRv6: solo para batch sin prisa o entornos sin pila Python. Y un swapfile nuevo con `mkswap -U clear --size 4G --file` + `pri=10` en fstab (verificado con `findmnt --verify`: 0 errores) es seguro si no se toca el swap existente.
+
+## 14. Matriz de validación completa del set de charts (2026-08-05)
+
+**Contexto:** cierre de la validación de la cascada sobre los 8 gráficos de `ejemplos/test_charts/` + el demo oficial, con fallback VLM real (`--con-fallback`).
+
+| Chart | Fast path | Fallback ChartParsing | Resultado |
+|---|---|---|---|
+| bar_2series (mpl, 2 series) | 6/6 + 12/12 (~70 s, 1 GB) | — | OK |
+| plotly_barra (plotly) | 6/6 + 12/12 (~58 s, 1 GB) | — | OK |
+| grafico_demo (oficial) | rechaza (año truncado) | 18/18 (~333 s, 5.2 GB) | OK |
+| pie_5 | rechaza (sin años) | 5/5 + 5/5 (~209 s) | OK |
+| line_3series | rechaza | 3/3 + 24/24 (~275 s) | OK |
+| seaborn_agrupado | rechaza | 4/4 + 8/8 (~248 s) | OK |
+| bar_apilada | rechaza | 3/3 + 12/12 (~236 s) | OK |
+| scatter_valores | rechaza | 0/6 + 0/12 — **el VLM alucina una tabla** (1999/2008/2010 con valores inventados) | NO soportado |
+
+**Hallazgo 1 — ChartParsing transpone filas/columnas según el tipo de gráfico:** en line y stacked-bar emite filas = series y columnas = categorías (línea: `A|M1..M8`; apilada: `Part A|Q1..Q4`), mientras que en barras agrupadas emite filas = categorías. Las referencias de validación se ajustaron al formato real del modelo (lección: el ground truth debe replicar el formato de salida del motor, no el "natural" del dataset).
+
+**Hallazgo 2 — el scorer debe tolerar sufijos:** los valores de pie salen como `35.0%`; `normalizar()` ahora quita `%` antes de comparar. Un 0/5 no era fallo del modelo sino del validador.
+
+**Hallazgo 3 — scatter no es soportado por PP-Chart2Table:** el modelo (entrenado para barra/línea/pastel) inventa datos plausibles en lugar de devolver los labels reales de los puntos. Peor que un error: es una falsa tabla. Para scatter, la lectura útil es solo el modo texto (PP-OCRv6 lee los labels `x,y`), sin reconstrucción de tabla.
+
+**Verificación:** 59/59 tests, matriz completa con corridas reales (2× fast path + 5× fallback VLM + 1 rechazo documentado).

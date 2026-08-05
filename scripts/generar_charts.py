@@ -87,8 +87,8 @@ def line_3series() -> None:
             ax.text(x, v + 0.5, f"{v}", ha="center", fontsize=8)
     ax.legend()
     ax.set_title("Three Series Line Chart")
-    filas = [["mes", "A", "B", "C"]] + [
-        [m, a, b, c] for m, a, b, c in zip(meses, s1, s2, s3)]
+    # Referencia en el formato del VLM: filas = series, columnas = meses
+    filas = [["serie"] + meses, ["A"] + s1, ["B"] + s2, ["C"] + s3]
     guardar(fig, "line_3series.png", filas)
 
 
@@ -116,9 +116,9 @@ def bar_apilada() -> None:
         bottom += vals
     ax.legend()
     ax.set_title("Stacked Bar Chart")
-    filas = [["trimestre", "PartA", "PartB", "PartC"]] + [
-        [t, comp["Part A"][i], comp["Part B"][i], comp["Part C"][i]]
-        for i, t in enumerate(trimestres)]
+    # Referencia en el formato del VLM: filas = series, columnas = trimestres
+    filas = [["parte"] + trimestres] + [
+        [nombre] + comp[nombre] for nombre in comp]
     guardar(fig, "bar_apilada.png", filas)
 
 

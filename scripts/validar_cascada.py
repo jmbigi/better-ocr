@@ -37,7 +37,8 @@ def cargar_referencia(csv_path: str) -> tuple[list[str], list[list[str]]]:
 
 
 def normalizar(v: str) -> float:
-    return round(float(v.replace(",", ".")), 2)
+    """Float normalizado; tolera sufijos como '%' (35.0% == 35.0)."""
+    return round(float(v.replace(",", ".").rstrip("%").strip()), 2)
 
 
 def puntuar(etiquetas_esp, valores_esp, df) -> tuple[int, int]:
