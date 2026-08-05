@@ -300,7 +300,9 @@ Evidencia de pruebas: `docs/PRUEBAS.md`
 ## Reglas específicas de este proyecto (extract-charts)
 
 - **Verificación de sintaxis:** `python3 -m py_compile extractor_final.py chart_server.py ocr_rapido.py vision.py` (sin dependencias externas).
-- **Pruebas unitarias:** `python3 -m unittest discover -s tests -v` (solo stdlib + pandas; sin paddleocr, usa modelos simulados). Ejecútalas al tocar `extractor_final.py` o `chart_server.py`.
+- **Pruebas unitarias:** `python3 -m unittest discover -s tests -v` (solo stdlib + pandas; sin paddleocr, usa modelos simulados). Ejecútalas al tocar `extractor_final.py`, `chart_server.py`, `ocr_rapido.py` o `vision.py`.
+- **Visión multi-modo (`vision.py`):** modos `auto/texto/graficos/doc/objetos/humano`; perfil por máquina con `BETTER_OCR_PERFIL=completo|ligero` o `better_ocr.json` (bloquea modos que harían OOM). Bug conocido paddlepaddle 3.3.1 PIR+oneDNN (issue #18162): requiere `enable_mkldnn=False` (PaddleOCR/PPStructureV3) o `PADDLE_PDX_ENABLE_MKLDNN_BYDEFAULT=0` (PaddleX/RT-DETR). Scatter NO es soportado por ChartParsing (alucina tablas, lección 14).
+- **Cascada de gráficos:** ruta rápida `ocr_rapido.py` (PP-OCRv6 + emparejamiento geométrico, ~60 s/1 GB) con gate de plausibilidad; si falla, cae al VLM ChartParsing (exacto, ~5 min/5.2 GB). Nunca devuelvas tabla incompleta: el gate es quien decide.
 - **Verificación local obligatoria (sin GitHub/CI externo):** `bash scripts/verificar-proyecto.sh` ejecuta sintaxis + tests + checks de reglas, config y seguridad; hook `pre-commit` en `scripts/hooks/pre-commit` (instalación: `cp scripts/hooks/pre-commit .git/hooks/pre-commit`).
 - **Entorno requerido para ejecutar inferencia:** `paddlepaddle==3.3.1` (CPU) y `paddleocr[doc-parser]`; PaddleOCR se importa de forma perezosa (solo dentro de `main()`), no exijas su importación al inicio.
 - **`export TMPDIR=/var/tmp` obligatorio antes de la primera ejecución:** la descarga del modelo (2.24 GB) falla con `OSError(122)` si `/tmp` es pequeño.
