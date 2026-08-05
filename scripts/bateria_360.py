@@ -84,7 +84,7 @@ BATERIA = [
         "id": "objetos_frutas",
         "dimension": "objetos",
         "imagen": IMG("ejemplos/test_charts/foto_det.png"),
-        "prompt": "Lista los objetos que ves en la imagen, uno por linea.",
+        "prompt": "List the objects you see in the image, one per line (answer in English).",
         "esperado": {"etiquetas": ["banana", "apple", "orange"], "conteo": 3},
         "scoring": "objetos",
     },
@@ -208,7 +208,7 @@ print(json.dumps({{"texto": texto.strip(), "tiempo_s": round(time.monotonic()-t0
                 "stderr": proc.stderr[-300:]}
 
 
-def run_ollama(imagen: str, prompt: str, host: str, modelo="qwen2.5vl",
+def run_ollama(imagen: str, prompt: str, host: str, modelo="qwen2.5vl:3b",
                timeout_s=1800) -> dict:
     """API /api/generate de ollama (temperatura 0 = determinista)."""
     with open(imagen, "rb") as f:
@@ -232,7 +232,7 @@ def run_ollama(imagen: str, prompt: str, host: str, modelo="qwen2.5vl",
 
 # --- Orquestador -----------------------------------------------------------------
 
-def ejecutar_motor(motor: str, test: dict, host: str, device: str) -> dict:
+def ejecutar_motor(motor: str, test: dict, host: str, device: str, modelo: str) -> dict:
     imagen, prompt = test["imagen"], test["prompt"]
     if not os.path.exists(imagen):
         return {"ok": False, "error": f"imagen inexistente: {imagen}",
@@ -240,7 +240,7 @@ def ejecutar_motor(motor: str, test: dict, host: str, device: str) -> dict:
     if motor == "docbee":
         resultado = run_docbee(imagen, prompt, device)
     elif motor == "ollama":
-        resultado = run_ollama(imagen, prompt, host)
+        resultado = run_ollama(imagen, prompt, host, modelo)
     else:
         return {"ok": False, "error": f"motor desconocido: {motor}"}
     resultado["motor"] = motor
@@ -255,6 +255,7 @@ def main() -> None:
     parser = argparse.ArgumentParser(description="Bateria 360° VLM (docbee vs qwen2.5vl)")
     parser.add_argument("--motor", choices=["docbee", "ollama", "ambos"], default="ambos")
     parser.add_argument("--host", default="127.0.0.1", help="host de ollama (default: 127.0.0.1)")
+    parser.add_argument("--modelo", default="qwen2.5vl:3b", help="modelo ollama (default: qwen2.5vl:3b)")
     parser.add_argument("--device", default="cuda", help="device para docbee (default: cuda)")
     parser.add_argument("--solo", default=None, help="id de test unico (ej. valores_demo)")
     args = parser.parse_args()
@@ -268,7 +269,7 @@ def main() -> None:
     print("-" * 78)
     for test in tests:
         for motor in motores:
-            r = ejecutar_motor(motor, test, args.host, args.device)
+            r = ejecutar_motor(motor, test, args.host, args.device, args.modelo)
             informe["tests"].append(r)
             if not r.get("ok"):
                 print(f"{motor:<8}{test['id']:<16}{test['dimension']:<14}{'—':<14}{'—':<10}{'—':<8}  FALLO: {r.get('error','')[:50]}")
