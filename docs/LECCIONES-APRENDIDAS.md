@@ -202,3 +202,17 @@
 **Conclusión (n=2):** el 7b mejora la calidad descriptiva de forma real pero modesta — contexto de escena y especificidad de color — y nunca pierde frente a gemma; ambos locales quedan por debajo de la referencia comercial en granularidad. Las imágenes externas no se commitean al repo (contenido con derechos; solo en directorio temporal).
 
 **Lección:** para decidir entre modelos hay que probar con contenido real y una referencia independiente; la batería objetiva puede empatar mientras la calidad descriptiva difiere — por eso la batería 360° incluye dimensiones libres con rúbrica humana.
+
+## 17. docbee (PP-DocBee-2B) en GPU: cinco bugs de integración resueltos (2026-08-05)
+
+**Contexto:** cierre del pendiente "docbee en GPU" (RTX 3070 Laptop 8 GB, driver 580, CUDA 13, paddlepaddle-gpu 3.3.1 build cu126 + paddlex 3.7.2). La batería 360° había corrido solo ollama; docbee nunca había arrancado. Cada bug se resolvió de a uno, con evidencia.
+
+1. **`cuda` no es un device válido para paddlex:** `DocVLM(device="cuda")` lanza `AssertionError` — `SUPPORTED_DEVICE_TYPE` en `paddlex/utils/device.py` solo acepta `cpu|gpu|xpu|npu|mlu`. El script pasaba `--device cuda` directo. Fix: normalizar `cuda*` → `gpu` en `run_docbee`.
+2. **DocVLM espera `query`, no `prompt`:** el input dict correcto es `{"image": ..., "query": ...}` (CLI help del propio `doc_vlm.py`). Con `prompt` → `KeyError: 'query'` en el processor. La batería nunca lo había usado, por eso no se detectó.
+3. **paddle 3.3.1 GPU + flash attention: `paddle.cumsum` promueve int32 → int64**, y `flash_attn_unpadded` exige cu_seqlens int32 → `InvalidArgument` y SIGABRT en el decode (exacto: `flash_attn_unpadded(q,q,q,cu,cu,...)` con cu int64 falla y con int32 funciona, verificado con repro mínimo). El código de paddlex (`_get_unpad_data`) calcula int32 pero cumsum lo promueve. Fix: parche en el subproceso que fuerza `cu.astype('int32')`.
+4. **OOM en 8 GB a resolución nativa:** `MAX_PIXELS = 16384*28*28` (12.8M px) genera miles de tokens y el `cast` de logits a fp32 (seq × 151936 vocabulario) desborda el pool de ~7.5 GB (el allocator reserva 95%). Con `MAX_PIXELS=262144` (0.5M px ≈ 245 tokens) todo cabe (verificado: pie 5/5). El flag `FLAGS_fraction_of_gpu_memory_to_use=0.98` NO sirve (CUBLAS error 15).
+5. **LD_LIBRARY_PATH del host sombrea el CUDNN del venv:** el shell exporta rutas `nvidia/` del pyenv (CUDNN 9.1); paddle 3.3.1 (compilado con CUDNN 9.5) carga `libcudnn_graph.so.9` viejo → `undefined symbol: cudnnGetLibConfig` + SIGABRT. Fix en `run_docbee`: anteponer `venv/site-packages/nvidia/*/lib` y quitar rutas `.pyenv` del env del subproceso.
+
+**Resultado:** 8/8 tests de docbee en GPU (3.5–12 s por test, salvo descripcion 205 s y documento 165 s), ~7.1 GB de RAM. vs gemma3:4b: docbee gana ui_qa (4/4 vs 2/4) y personas (1/2 vs 0/2); gemma gana valores y velocidad — pero docbee corrió con resolución limitada (0.5M px) por el OOM, así que la comparación de valores es injusta a favor de gemma. Ver PRUEBAS.md §4.1.
+
+**Lección:** en GPU de 8 GB los VLM 2B caben solo con max_pixels reducido; y cada capa (device name, key del input, dtype de índices, pool de memoria, shadowing de libs dinámicas) es una fuente real de fallo que no aparece en CPU — el harness debe ejecutarse en la máquina objetivo antes de declarar un motor "validado".

@@ -46,7 +46,26 @@ Informe completo: `/var/tmp/better-ocr-bench/reporte.json`.
 
 Descripción de imágenes reales (n=2): qwen2.5vl:7b > gemma3:4b (contexto de
 escena y especificidad de color), ambos < modelo comercial de referencia.
-**Pendiente:** docbee (PP-DocBee-2B) en equipo con GPU.
+
+### 4.1 Batería 360° VLM con docbee (PP-DocBee-2B) en GPU (RTX 3070 8 GB, 2026-08-05)
+
+docbee ya NO es pendiente: corrió completo en GPU con `scripts/bateria_360.py
+--motor docbee --device cuda` (max_pixels 262144, ver lección 17).
+
+| Test | docbee GPU | gemma3:4b (CPU) |
+|---|---|---|
+| ui_qa | **4/4** (9.7 s) | 2/4 (4.8 s) |
+| interpretacion | rúbrica (12.4 s) | rúbrica (2.9 s) |
+| valores (demo) | 3/12 (4.6 s) | 7/12 (1.6 s) |
+| valores (pie) | 5/5 (3.5 s) | 5/5 (1.5 s) |
+| objetos (frutas) | 3/4 (3.2 s) | 3/4 (1.9 s) |
+| objetos (personas) | **1/2** (1.4 s) | 0/2 (1.1 s) |
+| descripcion | rúbrica (204.6 s) | rúbrica (7.0 s) |
+| documento | **2/2** (165.1 s) | 2/2 (7.1 s) |
+
+Salidas crudas y reporte: `/var/tmp/bateria360/`. docbee ganó ui_qa y
+personas; gemma ganó en velocidad y valores (docbee corrió con max_pixels
+reducido a 0.5M px para caber en 8 GB — resolución limitada, ver lección 17).
 
 ## 5. Servidor HTTP (E2E real)
 
@@ -66,3 +85,4 @@ escena y especificidad de color), ambos < modelo comercial de referencia.
 - Captions/pinturas: requieren VLM ≥ 0.9B (~9 GB) → OOM en equipos de 7 GB.
 - qwen2.5vl:7b en CPU: deja la RAM del host crítica; descargar con `keep_alive=0`.
 - Portabilidad: solo probado en Linux/x86 (CPU 7.7 GB y 16 GB con GPU en lección 10).
+- docbee en GPU 8 GB: requiere max_pixels ≤ 0.5M px (OOM a resolución nativa); flash attention exige cu_seqlens int32 (paddle 3.3.1 GPU promueve a int64); LD_LIBRARY_PATH del host no debe sombrear nvidia-cudnn del venv (lección 17).
