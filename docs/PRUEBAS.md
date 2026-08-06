@@ -84,5 +84,5 @@ reducido a 0.5M px para caber en 8 GB — resolución limitada, ver lección 17)
 - Scatter: no soportado por ChartParsing (alucina).
 - Captions/pinturas: requieren VLM ≥ 0.9B (~9 GB) → OOM en equipos de 7 GB.
 - qwen2.5vl:7b en CPU: deja la RAM del host crítica; descargar con `keep_alive=0`.
-- Portabilidad: solo probado en Linux/x86 (CPU 7.7 GB y 16 GB con GPU en lección 10).
+- Portabilidad: solo probado en Linux/x86 (CPU 7.7 GB; GPU RTX 3070 8 GB validada en lección 17).
 - docbee en GPU 8 GB: requiere max_pixels ≤ 0.5M px (OOM a resolución nativa); flash attention exige cu_seqlens int32 (paddle 3.3.1 GPU promueve a int64); LD_LIBRARY_PATH del host no debe sombrear nvidia-cudnn del venv (lección 17).
