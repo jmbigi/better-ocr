@@ -52,20 +52,25 @@ escena y especificidad de color), ambos < modelo comercial de referencia.
 docbee ya NO es pendiente: corrió completo en GPU con `scripts/bateria_360.py
 --motor docbee --device cuda` (max_pixels 262144, ver lección 17).
 
-| Test | docbee GPU | gemma3:4b (CPU) |
-|---|---|---|
-| ui_qa | **4/4** (9.7 s) | 2/4 (4.8 s) |
-| interpretacion | rúbrica (12.4 s) | rúbrica (2.9 s) |
-| valores (demo) | 3/12 (4.6 s) | 7/12 (1.6 s) |
-| valores (pie) | 5/5 (3.5 s) | 5/5 (1.5 s) |
-| objetos (frutas) | 3/4 (3.2 s) | 3/4 (1.9 s) |
-| objetos (personas) | **1/2** (1.4 s) | 0/2 (1.1 s) |
-| descripcion | rúbrica (204.6 s) | rúbrica (7.0 s) |
-| documento | **2/2** (165.1 s) | 2/2 (7.1 s) |
+| Test (función) | Qué evalúa | docbee GPU | gemma3:4b (CPU) | Comentario |
+|---|---|---|---|---|
+| ui_qa (QA de UI) | Campos y valores visibles (flight/gate/seat/name) | **4/4** (9.7 s) | 2/4 (4.8 s) | docbee es modelo de documento: lee la estructura mejor que gemma |
+| interpretacion (rúbrica) | Tendencias por año, 3 frases | rúbrica (12.4 s) | rúbrica (2.9 s) | Salidas crudas en `/var/tmp/bateria360/` para rúbrica humana |
+| valores (demo) | 12 valores incl. negativos del gráfico oficial | 3/12 (4.6 s) | **7/12** (1.6 s) | docbee penalizado: max_pixels 0.5M px (8 GB) pierde dígitos; a resolución nativa daba 6/12 |
+| valores (pie) | 5 valores de un gráfico circular | **5/5** (3.5 s) | **5/5** (1.5 s) | Empate: ambos exactos (35.0, 25.5, 18.2, 13.3, 8.0) |
+| objetos (frutas) | banana/apple/orange + conteo | 3/4 (3.2 s) | 3/4 (1.9 s) | Empate: ambos fallan las frutas pequeñas |
+| objetos (personas) | Personas en foto (esperado 10) | **1/2** (1.4 s) | 0/2 (1.1 s) | docbee acierta la clase; gemma no llega a 10 |
+| descripcion (rúbrica) | Descripción libre de una foto | rúbrica (204.6 s) | rúbrica (7.0 s) | docbee 30× más lento: genera textos largos token a token |
+| documento (etiquetas) | Tipo/título/secciones/figuras de un paper | **2/2** (165.1 s) | 2/2 (7.1 s) | Empate en puntaje; gemma 23× más rápido |
 
-Salidas crudas y reporte: `/var/tmp/bateria360/`. docbee ganó ui_qa y
-personas; gemma ganó en velocidad y valores (docbee corrió con max_pixels
-reducido a 0.5M px para caber en 8 GB — resolución limitada, ver lección 17).
+Salidas crudas y reporte: `/var/tmp/bateria360/`.
+
+**Conclusión:** docbee gana donde importa la lectura de documentos/UI (ui_qa
+4/4 y etiquetas de doc 2/2); gemma domina velocidad (10-30×) y valores — pero
+con ventaja injusta por el límite de resolución del docbee en 8 GB (a
+resolución nativa docbee da 6/12). En producción: gemma3:4b si importa
+rapidez; docbee en GPU solo si la resolución no es crítica o hay >12 GB de
+VRAM.
 
 ## 5. Servidor HTTP (E2E real)
 
