@@ -26,6 +26,7 @@ Las dimensiones libres (interpretacion/descripcion) se guardan crudas en
 
 import argparse
 import base64
+import glob
 import json
 import os
 import re
@@ -169,13 +170,29 @@ def puntuar(test: dict, texto: str) -> dict:
 
 def run_docbee(imagen: str, prompt: str, device: str, timeout_s=1800) -> dict:
     """DocVLM (PP-DocBee-2B) en subproceso aislado con RAM pico."""
+    # paddlex espera 'gpu', no 'cuda' (SUPPORTED_DEVICE_TYPE en paddlex/utils/device.py)
+    device = "gpu" if device.startswith("cuda") else device
+    # Workaround GPU (paddle 3.3.1 + paddlex 3.7.2, ver docs/LECCIONES-APRENDIDAS):
+    # paddle.cumsum promueve int32 -> int64 y flash_attn_unpadded exige int32
+    # (crashea con SIGABRT/InvalidArgument). Se fuerza int32 en _get_unpad_data.
+    patch_int32 = """
+from paddlex.inference.models.doc_vlm.modeling import qwen2_vl as _qm
+_orig_unpad = _qm._get_unpad_data
+def _fix_unpad(mask):
+    indices, cu, mx = _orig_unpad(mask)
+    return indices, cu.astype('int32'), mx
+_qm._get_unpad_data = _fix_unpad
+from paddlex.inference.models.doc_vlm.processors import qwen2_vl as _pq
+_pq.MAX_PIXELS = 262144
+"""
     codigo = f"""
 import json, sys, time
 sys.path.insert(0, {RAIZ!r})
+{patch_int32}
 from paddleocr import DocVLM
 modelo = DocVLM(model_name="PP-DocBee-2B", device={device!r})
 t0 = time.monotonic()
-res = modelo.predict({{"image": {imagen!r}, "prompt": {prompt!r}}})
+res = modelo.predict({{"image": {imagen!r}, "query": {prompt!r}}})
 texto = ""
 for r in res:
     texto += (r.json.get("res", {{}}).get("result") or "") + "\\n"
@@ -190,11 +207,23 @@ except OSError:
 print(json.dumps({{"texto": texto.strip(), "tiempo_s": round(time.monotonic()-t0, 1), "ram_mb": round(pico, 1)}}))
 """
     t0 = time.monotonic()
+    env = {**os.environ, "TMPDIR": "/var/tmp",
+           "PADDLE_PDX_ENABLE_MKLDNN_BYDEFAULT": "0"}
+    # GPU: las nvidia-*.cu12 del venv (CUDNN 9.5 etc.) deben cargarse ANTES que
+    # cualquier nvidia-cu12 del sistema/pyenv (CUDNN 9.1 rompe paddle con
+    # libcudnn_graph.so: undefined symbol).
+    import site as _site
+    nvidia_dirs = sorted(
+        glob.glob(os.path.join(_site.getsitepackages()[0], "nvidia", "*", "lib"))
+    )
+    ld = ":".join(p for p in os.environ.get("LD_LIBRARY_PATH", "").split(":")
+                  if p and ".pyenv" not in p)
+    env["LD_LIBRARY_PATH"] = ":".join(nvidia_dirs + [ld])
     try:
         proc = subprocess.run(
             [sys.executable, "-c", codigo], capture_output=True, text=True,
             timeout=timeout_s,
-            env={**os.environ, "TMPDIR": "/var/tmp", "PADDLE_PDX_ENABLE_MKLDNN_BYDEFAULT": "0"},
+            env=env,
         )
     except subprocess.TimeoutExpired:
         return {"ok": False, "error": f"timeout {timeout_s}s"}
@@ -219,6 +248,9 @@ def _garantizar_ollama(host: str, binario: str | None = None) -> tuple[bool, str
     except OSError:
         pass
     binario = binario or os.path.expanduser("~/ollama/bin/ollama")
+    if not os.path.exists(binario):
+        import shutil
+        binario = shutil.which("ollama") or binario
     if not os.path.exists(binario):
         return False, f"no se encuentra el binario de ollama: {binario}"
     import subprocess
