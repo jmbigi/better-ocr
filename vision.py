@@ -186,6 +186,22 @@ def modo_doc(imagen: str) -> dict:
             "markdown": markdown_texto[:10000]}
 
 
+def _parsear_detecciones(res_json: dict, solo_personas: bool) -> list:
+    """Extrae las detecciones del JSON de un Result de RT-DETR (reutilizado
+    por modo_objetos y modo_objetos_lote)."""
+    detecciones = []
+    for det in (res_json.get("res", {}).get("boxes", []) or []):
+        clase = det.get("label", det.get("class_name", ""))
+        if solo_personas and clase != "person":
+            continue
+        detecciones.append({
+            "clase": clase,
+            "score": round(float(det.get("score", 0)), 4),
+            "bbox": [round(v, 1) for v in det.get("coordinate", det.get("bbox", []))],
+        })
+    return detecciones
+
+
 def modo_objetos(imagen: str, solo_personas: bool) -> dict:
     # mkldnn roto en paddlepaddle 3.3.1 (PIR + oneDNN, issue #18162): se
     # desactiva por defecto ANTES de importar paddlex (lee el flag al importar)
@@ -195,17 +211,25 @@ def modo_objetos(imagen: str, solo_personas: bool) -> dict:
     res = list(modelo.predict(imagen))  # predict es generador
     if not res:
         return {"ok": False, "error": "La detección no devolvió resultados"}
-    detecciones = []
-    for det in (res[0].json.get("res", {}).get("boxes", []) or []):
-        clase = det.get("label", det.get("class_name", ""))
-        if solo_personas and clase != "person":
-            continue
-        detecciones.append({
-            "clase": clase,
-            "score": round(float(det.get("score", 0)), 4),
-            "bbox": [round(v, 1) for v in det.get("coordinate", det.get("bbox", []))],
-        })
-    return {"ok": True, "detecciones": detecciones}
+    return {"ok": True, "detecciones": _parsear_detecciones(res[0].json, solo_personas)}
+
+
+def modo_objetos_lote(rutas: list) -> dict:
+    """RT-DETR sobre varias imagenes con UNA sola carga del modelo
+    (create_model NO cachea: cargarlo por imagen multiplica el tiempo por N
+    y revienta los timeouts — hallazgo en captcha_web, 2026-08-07)."""
+    os.environ["PADDLE_PDX_ENABLE_MKLDNN_BYDEFAULT"] = "0"
+    from paddlex import create_model  # import perezoso
+    modelo = create_model("RT-DETR-L")
+    salida = {}
+    for ruta in rutas:
+        try:
+            res = list(modelo.predict(ruta))
+            salida[ruta] = (_parsear_detecciones(res[0].json, False)
+                            if res else [])
+        except Exception:
+            salida[ruta] = []
+    return salida
 
 
 def ejecutar(imagen: str, modo: str, con_fallback: bool) -> dict:

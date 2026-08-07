@@ -83,18 +83,16 @@ def env_worker() -> dict:
     }
 
 # Script del worker de deteccion (se ejecuta con el python del venv, que es
-# quien tiene paddle/paddlex; una sola carga de RT-DETR para todo el lote).
+# quien tiene paddle/paddlex). modo_objetos_lote carga RT-DETR UNA vez para
+# todo el lote: create_model no cachea y cargar por imagen multiplica el
+# tiempo por N (hallazgo 2026-08-07, timeout del worker).
 WORKER_DETECCION = r"""
 import json, os, sys
 sys.path.insert(0, %(raiz)r)
 os.environ.setdefault("TMPDIR", "/var/tmp")
-from vision import modo_objetos
+from vision import modo_objetos_lote
 paths = json.load(sys.stdin)
-out = {}
-for p in paths:
-    res = modo_objetos(p, False)
-    out[p] = res.get("detecciones", []) if res.get("ok") else []
-json.dump(out, sys.stdout)
+json.dump(modo_objetos_lote(paths), sys.stdout)
 """
 
 # Worker OCR (fallback de instruccion): PP-OCRv6 en modo texto (vision).
