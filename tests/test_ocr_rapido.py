@@ -107,6 +107,23 @@ class TestEmparejar(unittest.TestCase):
         self.assertFalse(res.ok)
         self.assertIn("inconsistente", res.motivo)
 
+    def test_mixto_barra_linea_columnas_123_falla(self):
+        """Regresion A3 (2026-08-07): en el grafico mixto barra+linea la
+        etiqueta de la linea de un anio no se leyo y un valor suelto cayo
+        dentro de la ventana de otro -> columnas [1, 2, 3] por anio. El gate
+        debe rechazar y pedir el VLM, no devolver tabla incompleta."""
+        textos, polis = self.construir_demo()
+        # 2019 (i=1): se elimina el valor de la linea (indice 3*1+2)
+        del textos[3 * 1 + 2]
+        del polis[3 * 1 + 2]
+        # valor suelto dentro de la ventana de 2020 (centro x = 80+2*120+25)
+        textos.append("5.0")
+        polis.append(caja(300, 100, 320, 120))
+        res = emparejar(textos, polis, ancho_imagen=800)
+        self.assertFalse(res.ok)
+        self.assertIn("inconsistente", res.motivo)
+        self.assertIn("VLM", res.motivo)
+
     def test_valores_ordenados_por_x(self):
         """Las columnas se ordenan de izquierda a derecha (ingresos, beneficios)."""
         textos, polis = self.construir_demo()
