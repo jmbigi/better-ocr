@@ -73,6 +73,7 @@ class Handler(BaseHTTPRequestHandler):
     clics = []
     sin_desc = False
     desc_alternativa = ""
+    desc_clase = "rc-imageselect-desc"
     errores_antes_de_ok = 0
 
     def _responder(self, cuerpo, tipo="text/html; charset=utf-8"):
@@ -92,9 +93,9 @@ class Handler(BaseHTTPRequestHandler):
                 "<tr>" + "".join(CELDA.format(i=f * 3 + c) for c in range(3)) + "</tr>"
                 for f in range(3))
             desc = "" if Handler.sin_desc else (
-                f'<div class="rc-imageselect-desc">{Handler.desc_alternativa}</div>'
+                f'<div class="{Handler.desc_clase}">{Handler.desc_alternativa}</div>'
                 if Handler.desc_alternativa else
-                '<div class="rc-imageselect-desc">select all buses</div>')
+                f'<div class="{Handler.desc_clase}">select all buses</div>')
             pagina = PAGINA_BFRAME.format(filas=filas, desc=desc,
                                           fallos=Handler.errores_antes_de_ok)
             return self._responder(pagina.encode())
@@ -303,6 +304,30 @@ class TestOrquestadorLocal(unittest.TestCase):
                 f"http://127.0.0.1:{self.puerto}/clics.json") as r:
             pulsados = json.loads(r.read().decode())
         self.assertEqual(pulsados, [1])  # solo (0,1)
+
+    def test_instruccion_con_clase_real_desc_no_canonical(self):
+        """El DOM real usa 'rc-imageselect-desc-no-canonical' (hallazgo del
+        DOM guardado 2026-08-07): el orquestador debe leer la instruccion con
+        esa clase y completar el flujo."""
+        import captcha_web
+
+        Handler.clics = []
+        Handler.desc_clase = "rc-imageselect-desc-no-canonical"
+        self.addCleanup(setattr, Handler, "desc_clase", "rc-imageselect-desc")
+        url = f"http://127.0.0.1:{self.puerto}/"
+
+        def stub_detector(celdas_pil):
+            return {(0, 1): [{"clase": "bus", "score": 0.9}]}
+
+        res = captcha_web.resolver_web(url, detectar_lote=stub_detector,
+                                       timeout_s=60)
+        self.assertTrue(res["ok"], res)
+        self.assertEqual(res["veredicto"], "ok")
+        self.assertEqual(res["clase_objetivo"], "bus")
+        with urllib.request.urlopen(
+                f"http://127.0.0.1:{self.puerto}/clics.json") as r:
+            pulsados = json.loads(r.read().decode())
+        self.assertEqual(pulsados, [1])
 
     def test_variante_none_click_skip(self):
         """'If there are no crosswalks, click skip' (leccion 20): el parser

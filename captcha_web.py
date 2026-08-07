@@ -34,7 +34,8 @@ import urllib.request
 
 SELEC_INSTRUCCION = (
     "#rc-imageselect .rc-imageselect-desc, "
-    "#rc-imageselect .rc-imageselect-desc-noaccess"
+    "#rc-imageselect .rc-imageselect-desc-noaccess, "
+    "#rc-imageselect .rc-imageselect-desc-no-canonical"
 )
 # El prefijo de la tabla varia con el tamano del reto (rc-imageselect-table-33,
 # rc-imageselect-table-44): los tiles se seleccionan por su propia clase.
