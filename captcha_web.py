@@ -624,6 +624,7 @@ def resolver_web(url: str, headed: bool = False, salida: str = "",
         navegador.close()
         return {"ok": False, "error": "sin exito tras varios intentos",
                 "veredicto": resultado or "pendiente",
+                "clase_objetivo": res.get("clase_objetivo"),
                 "instruccion": instruccion,
                 "intento": max_intentos,
                 "tiempo_s": round(time.monotonic() - t_inicio, 1)}
