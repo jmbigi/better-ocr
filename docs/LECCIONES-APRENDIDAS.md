@@ -216,3 +216,24 @@
 **Resultado:** 8/8 tests de docbee en GPU (3.5–12 s por test, salvo descripcion 205 s y documento 165 s), ~7.1 GB de RAM. vs gemma3:4b: docbee gana ui_qa (4/4 vs 2/4) y personas (1/2 vs 0/2); gemma gana valores y velocidad — pero docbee corrió con resolución limitada (0.5M px) por el OOM, así que la comparación de valores es injusta a favor de gemma. Ver PRUEBAS.md §4.1.
 
 **Lección:** en GPU de 8 GB los VLM 2B caben solo con max_pixels reducido; y cada capa (device name, key del input, dtype de índices, pool de memoria, shadowing de libs dinámicas) es una fuente real de fallo que no aparece en CPU — el harness debe ejecutarse en la máquina objetivo antes de declarar un motor "validado".
+
+## 18. `ChartParsing(device="cpu")` NO controla el dispositivo del VLM: el predictor lo ignora y usa la GPU global (2026-08-07)
+
+**Contexto:** reintento del fallback VLM sobre el gráfico mixto (A4) — `validar_cascada.py` crea `ChartParsing(device="cpu")` y aun así el run abortó con SIGABRT en un kernel **GPU** de conv2d (`ConvCudnnKernel` → `InitDnnHandle`) por el cudnn 9.1 del pyenv. La investigación en el código fuente del venv explica el mecanismo completo:
+
+1. `paddleocr/_common_args.py:102-126` (`prepare_common_init_args`): con `engine=None` construye `engine_config = {"paddle_static": {...}}` — el VLM ChartParsing **no usa** ese motor.
+2. `paddlex/inference/models/__init__.py:206-216` (`_flatten_bucketed_engine_config`): el motor resuelto del DocVLM es `paddle_dynamic`; al no haber entrada en el bucket, devuelve **config vacía** con el warning exacto que salió en el log real: *"Bucketed engine_config has no entry for resolved engine 'paddle_dynamic'; using an empty config for that engine."*
+3. `paddlex/inference/models/predictors/local_model_predictor.py:62-86`: `device` es una **property** derivada de `engine_config` (`resolve_device` → `device_type` ausente → `None`), NO del parámetro `device` del pipeline.
+4. Con `device=None`: `TemporaryDeviceChanger(None)` no fija nada y `_switch_inputs_to_device` no mueve tensores (`doc_vlm/predictor.py:363-372`) → el forward corre en el **dispositivo global de paddle** = GPU si hay GPU visible.
+5. El conv2d GPU carga cudnn → coge el del pyenv (primero en `LD_LIBRARY_PATH`, 9.1) → paddle compilado con 9.5 → `undefined symbol: cudnnGetLibConfig` → SIGABRT (el bug 5 de la lección 17, disparado ahora por el VLM "CPU").
+
+**Por qué la matriz 8/8 de la lección 14 sí corrió en CPU:** entonces la GPU no era visible para paddle (las rutas `nvidia/` no estaban en `LD_LIBRARY_PATH` de la sesión), así que el dispositivo global era CPU de facto. Hoy la GPU es visible y el mismo comando va a GPU y aborta: **el `device="cpu"` del wrapper es cosmético para los VLM DocVLM.**
+
+**Riesgo en el proyecto:** el comentario en `chart_server.py:57` ("device explícito: el default prioriza GPU") es engañoso — el daemon `/chart` cargaría el VLM en GPU hoy y abortaría con SIGABRT en esta máquina. La validación E2E de la lección 7/14 corrió en un entorno sin GPU visible.
+
+**Fixes (verificados en fuente, pendientes de prueba en ejecución):**
+- **CPU forzado (sin tocar código):** `CUDA_VISIBLE_DEVICES=""` antes de lanzar → paddle no ve GPU y el conv cae a CPU. Recomendado para `chart_server.py`/`validar_cascada.py` en esta máquina.
+- **GPU con cudnn correcto:** el env de la lección 17 (anteponer `nvidia/*/lib` del venv, quitar rutas nvidia del pyenv) — el VLM corre en GPU, más rápido, pero los tiempos de referencia de la lección 14 eran CPU.
+- No hay forma de pasar `device` real al predictor desde el wrapper de paddleocr (el `engine_config` con `paddle_dynamic` + `device_type`/`device_id` no se expone por `ChartParsing(...)`).
+
+**Lección:** "device=cpu" en la API de alto nivel de paddleocr no es garantía de CPU para los modelos DocVLM; verificar el dispositivo real con `paddle.device.get_device()` dentro del proceso y aislar con `CUDA_VISIBLE_DEVICES` cuando se exija CPU.
