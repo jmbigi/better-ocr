@@ -605,15 +605,18 @@ def resolver_web(url: str, headed: bool = False, salida: str = "",
 
 
 def resolver_offline(imagen_ruta: str, n: int, instruccion: str,
-                     umbral_objetivo: float = None) -> dict:
+                     umbral_objetivo: float = None,
+                     fallback_vlm=None) -> dict:
     """Pipeline completo SIN navegador sobre una cuadricula guardada (pasada
     por celda offline): celdas + RT-DETR batch (una carga) + decision.
 
-    Incluye las detecciones por celda en el resultado (P0.1: reportar los
-    scores para ajustar el umbral con datos reales)."""
+    Si el worker no detecta nada (clase no-COCO) y se pasa fallback_vlm
+    (hook fallback_vlm(celdas_pil, clase)), las celdas se re-evaluan con el
+    VLM. Incluye las detecciones por celda en el resultado (P0.1: reportar
+    los scores para ajustar el umbral con datos reales)."""
     from PIL import Image
 
-    from captcha_ia import aumentar_escala, celdas_grid, resolver
+    from captcha_ia import aumentar_escala, celdas_grid, parsear_instruccion, resolver
 
     if umbral_objetivo is None:
         umbral_objetivo = umbral_objetivo_para(n)
@@ -621,6 +624,10 @@ def resolver_offline(imagen_ruta: str, n: int, instruccion: str,
     celdas_pil = [(f, c, aumentar_escala(celda))
                   for f, c, celda in celdas_grid(imagen, n=n)]
     detecciones = detectar_batch_worker(celdas_pil)
+    if not any(detecciones.values()) and fallback_vlm is not None:
+        clase = parsear_instruccion(instruccion)
+        if clase:
+            detecciones = fallback_vlm(celdas_pil, clase)
 
     def detectar_celda(_celda, fila, col):
         return detecciones.get((fila, col), [])
@@ -669,8 +676,15 @@ def main() -> None:
     if args.offline:
         if not args.n or not args.instruccion:
             parser.error("--offline requiere --n y --instruccion")
-        resultado = resolver_offline(args.offline, args.n, args.instruccion,
-                                     umbral_objetivo=args.umbral_objetivo)
+        if args.vlm_fallback:
+            import functools
+            fallback_vlm = functools.partial(fallback_vlm_ollama,
+                                             modelo=args.vlm_modelo)
+        else:
+            fallback_vlm = None
+        resultado = resolver_offline(
+            args.offline, args.n, args.instruccion,
+            umbral_objetivo=args.umbral_objetivo, fallback_vlm=fallback_vlm)
         print(json.dumps(resultado, ensure_ascii=False, indent=2))
         return
     if not args.url:

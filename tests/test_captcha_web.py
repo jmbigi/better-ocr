@@ -3,6 +3,7 @@
 valida en vivo). Ejecutar: python3 -m unittest discover -s tests -v
 """
 
+import os
 import unittest
 from unittest import mock
 
@@ -11,6 +12,7 @@ from captcha_web import (
     indice_a_fila_col,
     n_desde_tiles,
     parsear_respuesta_vlm,
+    resolver_offline,
     umbral_objetivo_para,
 )
 
@@ -80,6 +82,45 @@ class TestIndiceAFilaCol(unittest.TestCase):
         self.assertEqual(indice_a_fila_col(3, 3), (1, 0))
         self.assertEqual(indice_a_fila_col(8, 3), (2, 2))
         self.assertEqual(indice_a_fila_col(15, 4), (3, 3))
+
+
+class TestResolverOffline(unittest.TestCase):
+    def _ruta_grid(self):
+        import tempfile
+        from PIL import Image
+
+        ruta = os.path.join(tempfile.mkdtemp(), "reto.png")
+        Image.new("RGB", (120, 120), (240, 240, 240)).save(ruta)
+        return ruta
+
+    def test_fallback_vlm_cuando_worker_vacio(self):
+        # clase no-COCO: el worker no ve nada -> el VLM la resuelve
+        llamadas = []
+
+        def vlm(celdas_pil, clase):
+            llamadas.append(clase)
+            return {(0, 1): [{"clase": clase, "score": 1.0}]}
+
+        with mock.patch("captcha_web.detectar_batch_worker",
+                        return_value={}):
+            res = resolver_offline(
+                self._ruta_grid(), n=3,
+                instruccion="select all crosswalks", fallback_vlm=vlm)
+        self.assertTrue(res["ok"], res)
+        self.assertEqual(llamadas, ["crosswalk"])
+        self.assertEqual(sorted(res["seleccion"]), [(0, 1)])
+        self.assertEqual(res["detecciones_por_celda"]["0,1"][0]["clase"],
+                         "crosswalk")
+
+    def test_sin_fallback_no_se_llama_al_vlm(self):
+        with mock.patch("captcha_web.detectar_batch_worker",
+                        return_value={}):
+            res = resolver_offline(
+                self._ruta_grid(), n=3,
+                instruccion="select all crosswalks")
+        self.assertTrue(res["ok"], res)
+        self.assertEqual(res["seleccion"], [])
+        self.assertEqual(res["celdas_detectadas"], 0)
 
 
 class TestUmbralObjetivo(unittest.TestCase):
