@@ -258,3 +258,105 @@ def decidir_celdas(detecciones_por_celda: dict, clase_objetivo: str,
                    "otra": "descartadas",
                    "incierta": "inciertas"}[estado]].append((fila, col))
     return resultado
+
+
+def resolver(imagen, instruccion: str, detectar_celda, n: int = 3,
+             umbral_objetivo: float = 0.45, umbral_resto: float = 0.6) -> dict:
+    """Pipeline completo (sin navegador): instruccion -> celdas -> deteccion
+    -> decision. `detectar_celda(celda_pil, fila, col)` devuelve la lista de
+    detecciones {clase, score}. El detector se inyecta: stub en --local,
+    vision.modo_objetos en modo real."""
+    clase = parsear_instruccion(instruccion)
+    if not clase:
+        return {"ok": False,
+                "error": f"instruccion no parseable: {instruccion!r}"}
+    detecciones = {}
+    for fila, col, celda in celdas_grid(imagen, n=n):
+        detecciones[(fila, col)] = detectar_celda(aumentar_escala(celda), fila, col)
+    decision = decidir_celdas(detecciones, clase,
+                              umbral_objetivo, umbral_resto)
+    return {"ok": True, "clase_objetivo": clase, "n": n,
+            **decision, "celdas_total": n * n}
+
+
+def stub_detector(clases_por_celda: dict, score: float = 0.9):
+    """Detector deterministico para --local: lee el ground truth de la demo."""
+    def detectar(_celda, fila, col):
+        return [{"clase": c, "score": score}
+                for c in clases_por_celda.get((fila, col), [])]
+    return detectar
+
+
+def generar_demo_local(n: int = 3, semilla: int = 7, salida: str = ""):
+    """Genera una cuadricula sintetica determinista (sin navegador) con
+    figuras por clase COCO y su ground truth. Devuelve el dict de la demo."""
+    import random
+    from PIL import Image, ImageDraw
+
+    rng = random.Random(semilla)
+    clases = ["bus", "car", "traffic light", "bicycle"]
+    colores = {"bus": (0, 90, 180), "car": (200, 60, 60),
+               "traffic light": (60, 60, 60), "bicycle": (0, 140, 90)}
+    borde, tam = 4, 120
+    im = Image.new("RGB", (tam * n + borde * (n + 1),
+                           tam * n + borde * (n + 1)), (245, 245, 245))
+    draw = ImageDraw.Draw(im)
+    clases_por_celda = {}
+    for fila in range(n):
+        for col in range(n):
+            x0 = borde + col * (tam + borde)
+            y0 = borde + fila * (tam + borde)
+            draw.rectangle([x0, y0, x0 + tam, y0 + tam],
+                           outline=(150, 150, 150), width=2)
+            if rng.random() < 0.35:
+                clase = rng.choice(clases)
+                cx = x0 + 30 + rng.randint(0, 40)
+                cy = y0 + 40 + rng.randint(0, 30)
+                draw.rounded_rectangle([cx, cy, cx + 50, cy + 30], radius=6,
+                                       fill=colores[clase])
+                clases_por_celda[(fila, col)] = [clase]
+    ruta = salida or f"/var/tmp/demo_captcha_{n}x{n}_s{semilla}.png"
+    im.save(ruta)
+    return {"ruta": ruta, "n": n, "instruccion": "select all buses",
+            "clases_por_celda": clases_por_celda}
+
+
+def main() -> None:
+    import argparse
+    from PIL import Image
+
+    parser = argparse.ArgumentParser(
+        description="Resolucion de retos reCAPTCHA v2 con el stack local")
+    parser.add_argument("--local", action="store_true",
+                        help="demo sintetica determinista sin navegador")
+    parser.add_argument("--n", type=int, default=3, choices=(3, 4),
+                        help="tamano de la cuadricula (demo local)")
+    parser.add_argument("--seed", type=int, default=7,
+                        help="semilla de la demo local")
+    parser.add_argument("--salida", default="",
+                        help="ruta PNG de salida de la demo local")
+    args = parser.parse_args()
+
+    if args.local:
+        demo = generar_demo_local(n=args.n, semilla=args.seed,
+                                  salida=args.salida)
+        res = resolver(Image.open(demo["ruta"]), demo["instruccion"],
+                       stub_detector(demo["clases_por_celda"]), n=args.n)
+        if not res["ok"]:
+            print("FALLO:", res["error"])
+            return
+        esperadas = sorted((f, c) for (f, c), clases in demo["clases_por_celda"].items()
+                           if "bus" in clases)
+        acierto = sorted(res["seleccion"]) == esperadas
+        print(f"demo: {demo['ruta']}")
+        print(f"instruccion: {demo['instruccion']!r} -> clase: {res['clase_objetivo']}")
+        print(f"seleccion: {sorted(res['seleccion'])} (esperado: {esperadas})")
+        print(f"descartadas: {sorted(res['descartadas'])}")
+        print(f"inciertas: {sorted(res['inciertas'])}")
+        print("VEREDICTO:", "OK" if acierto else "MAL")
+    else:
+        parser.error("modo real aun no implementado; usa --local (C5 pendiente)")
+
+
+if __name__ == "__main__":
+    main()

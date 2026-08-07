@@ -13,9 +13,12 @@ from captcha_ia import (
     celdas_grid,
     clasificar_celda,
     decidir_celdas,
+    generar_demo_local,
     parsear_instruccion,
     recortar_sufijos,
+    resolver,
     singularizar,
+    stub_detector,
 )
 
 
@@ -178,6 +181,41 @@ class TestDecidirCeldas(unittest.TestCase):
     def test_vacio(self):
         res = decidir_celdas({}, "bus")
         self.assertEqual(res, {"seleccion": [], "descartadas": [], "inciertas": []})
+
+
+class TestDemoLocal(unittest.TestCase):
+    def test_determinista_misma_semilla(self):
+        a = generar_demo_local(n=3, semilla=7, salida="/tmp/opencode/demo_a.png")
+        b = generar_demo_local(n=3, semilla=7, salida="/tmp/opencode/demo_b.png")
+        with open(a["ruta"], "rb") as fa, open(b["ruta"], "rb") as fb:
+            self.assertEqual(fa.read(), fb.read())
+        self.assertEqual(a["clases_por_celda"], b["clases_por_celda"])
+        self.assertGreaterEqual(len(a["clases_por_celda"]), 0)
+
+    def test_resolver_stub_clica_solo_buses(self):
+        demo = generar_demo_local(n=3, salida="/tmp/opencode/demo_c.png")
+        res = resolver(Image.open(demo["ruta"]), demo["instruccion"],
+                       stub_detector(demo["clases_por_celda"]), n=3)
+        self.assertTrue(res["ok"], res)
+        self.assertEqual(res["clase_objetivo"], "bus")
+        esperadas = sorted((f, c) for (f, c), clases in demo["clases_por_celda"].items()
+                           if "bus" in clases)
+        self.assertEqual(sorted(res["seleccion"]), esperadas)
+        self.assertEqual(res["celdas_total"], 9)
+
+    def test_resolver_instruccion_no_parseable(self):
+        demo = generar_demo_local(n=3, salida="/tmp/opencode/demo_d.png")
+        res = resolver(Image.open(demo["ruta"]), "select all images",
+                       stub_detector(demo["clases_por_celda"]), n=3)
+        self.assertFalse(res["ok"])
+        self.assertIn("no parseable", res["error"])
+
+    def test_demo_4x4(self):
+        demo = generar_demo_local(n=4, salida="/tmp/opencode/demo_e.png")
+        res = resolver(Image.open(demo["ruta"]), demo["instruccion"],
+                       stub_detector(demo["clases_por_celda"]), n=4)
+        self.assertTrue(res["ok"], res)
+        self.assertEqual(res["celdas_total"], 16)
 
 
 if __name__ == "__main__":
