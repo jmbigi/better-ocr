@@ -26,6 +26,10 @@ PREFIJOS = [
 # Estructuras con condición: "if there are X, select them"
 RE_CONDICION = re.compile(r"^(?:if|when)\s+(?:there\s+(?:are|is)\s+)?(.+?)\s*,\s*(?:select|click|choose|tap|touch)\s+(?:all|every|them|those)?\s*$")
 
+# Accion explicita de SKIP (variante "si no hay ninguna"): no hay clase
+# objetivo que seleccionar.
+RE_SKIP = re.compile(r"(?:click|press)\s+skip\b")
+
 # Sufijos de instrucción colgante, con y sin espacio (el OCR pega el texto:
 # "traffic lightsIf there are none..." -> recortar en "If").
 SUFIJOS = [
@@ -143,6 +147,9 @@ def parsear_instruccion(texto: str):
         return None
     t = texto.strip().lower()
     t = re.sub(r"\s+", " ", t)
+
+    if RE_SKIP.search(t):
+        return None
 
     m = RE_CONDICION.match(t)
     if m:

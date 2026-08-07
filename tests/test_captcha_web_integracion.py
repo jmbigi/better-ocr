@@ -273,6 +273,29 @@ class TestOrquestadorLocal(unittest.TestCase):
             pulsados = json.loads(r.read().decode())
         self.assertEqual(pulsados, [4])  # (1,1)
 
+    def test_variante_none_click_skip(self):
+        """'If there are no crosswalks, click skip' (leccion 20): el parser
+        devuelve None (no hay clase) y el orquestador pulsa SKIP sin tiles."""
+        import captcha_web
+
+        Handler.clics = []
+        Handler.desc_alternativa = "If there are no crosswalks, click skip"
+        self.addCleanup(setattr, Handler, "desc_alternativa", "")
+        url = f"http://127.0.0.1:{self.puerto}/"
+
+        def stub_detector(celdas_pil):
+            return {}  # no hay crosswalks en ninguna celda
+
+        res = captcha_web.resolver_web(url, detectar_lote=stub_detector,
+                                       timeout_s=60)
+        self.assertTrue(res["ok"], res)
+        self.assertEqual(res["veredicto"], "ok")
+        self.assertEqual(res["camino"], "skip")
+        with urllib.request.urlopen(
+                f"http://127.0.0.1:{self.puerto}/clics.json") as r:
+            pulsados = json.loads(r.read().decode())
+        self.assertEqual(pulsados, [])
+
 
 if __name__ == "__main__":
     unittest.main()

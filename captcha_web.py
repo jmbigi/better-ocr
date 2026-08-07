@@ -539,7 +539,8 @@ def resolver_web(url: str, headed: bool = False, salida: str = "",
             celdas_pil = [(f, c, aumentar_escala(celda))
                           for f, c, celda in celdas_grid(imagen, n=n)]
             detecciones = detectar_lote(celdas_pil)
-            if not any(detecciones.values()):
+            es_variante_none = "skip" in instruccion.lower()
+            if not any(detecciones.values()) and not es_variante_none:
                 # el worker fallo, el reto se re-renderizo a mitad, o la
                 # clase no es COCO (crosswalks/stairs): no pulsar a ciegas
                 if fallback_vlm is not None:
@@ -549,6 +550,8 @@ def resolver_web(url: str, headed: bool = False, salida: str = "",
                         detecciones = fallback_vlm(celdas_pil, clase)
                 if not any(detecciones.values()):
                     continue  # reintentar con la nueva captura
+                # la variante "click skip" NO es clic a ciegas: se deja
+                # pasar para que el camino SKIP la resuelva
 
             def detectar_celda(_celda, fila, col):
                 return detecciones.get((fila, col), [])
@@ -557,7 +560,6 @@ def resolver_web(url: str, headed: bool = False, salida: str = "",
                            umbral_objetivo=umbral_objetivo
                            or umbral_objetivo_para(n),
                            umbral_resto=UMBRAL_RESTO)
-            es_variante_none = "skip" in instruccion.lower()
             if not res["ok"]:
                 # instruccion no parseable: opcion conservadora = SKIP
                 pulsar_skip(bframe)

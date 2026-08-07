@@ -106,6 +106,20 @@ class TestParsearInstruccion(unittest.TestCase):
             with self.subTest(texto=repr(texto)):
                 self.assertIsNone(parsear_instruccion(texto))
 
+    def test_variante_skip_explicito(self):
+        # leccion 20: "If there are none, click skip" no tiene clase que
+        # seleccionar -> None (el orquestador pulsa SKIP)
+        for texto in ["If there are no crosswalks, click skip",
+                      "If there are none, click skip",
+                      "click skip once there are none left"]:
+            with self.subTest(texto=texto):
+                self.assertIsNone(parsear_instruccion(texto))
+
+    def test_verify_no_se_confunde_con_skip(self):
+        self.assertEqual(parsear_instruccion(
+            "Select all images with bicycles Click verify once there are none left"),
+            "bicycle")
+
     def test_singular_no_se_toca(self):
         self.assertEqual(parsear_instruccion("select the bus"), "bus")
 
