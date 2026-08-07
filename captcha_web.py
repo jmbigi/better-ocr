@@ -52,6 +52,18 @@ UMBRAL_RESTO = 0.6
 TIEMPO_ESPERA_RETO = 20.0
 TIEMPO_ESPERA_VEREDICTO = 15.0
 
+
+def umbral_objetivo_para(n: int) -> float:
+    """Umbral de la clase objetivo segun el tamano de la cuadricula.
+
+    Los tiles 4x4 son mas chicos y los objetos reales puntuan mas bajo
+    (medido en vivo, leccion 20 hallazgo 4: motos reales 0.24-0.28 en 4x4
+    vs 0.45 en 3x3). Con el umbral fijo 0.45 la seleccion quedaba incompleta
+    y el reto se rechazaba siempre. 0.30 sigue pudiendo perder las mas bajas:
+    los scores por celda se reportan (resolver_offline) para ajustar con
+    datos reales via --umbral-objetivo."""
+    return 0.45 if n == 3 else 0.30
+
 VENV_PYTHON = os.path.join(os.path.dirname(os.path.abspath(__file__)),
                            ".venv", "bin", "python")
 
@@ -320,7 +332,7 @@ def veredicto(pagina, bframe) -> str:
 def resolver_web(url: str, headed: bool = False, salida: str = "",
                  timeout_s: float = 150.0, max_intentos: int = 3,
                  fallback_vlm=None, detectar_lote=None,
-                 ocr_fallback=None) -> dict:
+                 ocr_fallback=None, umbral_objetivo: float = None) -> dict:
     """Ciclo completo real: checkbox -> reto -> instruccion -> tiles ->
     VERIFY/SKIP -> veredicto, con reintento tras re-render del reto.
 
@@ -439,7 +451,8 @@ def resolver_web(url: str, headed: bool = False, salida: str = "",
                 return detecciones.get((fila, col), [])
 
             res = resolver(imagen, instruccion, detectar_celda, n=n,
-                           umbral_objetivo=UMBRAL_OBJETIVO,
+                           umbral_objetivo=umbral_objetivo
+                           or umbral_objetivo_para(n),
                            umbral_resto=UMBRAL_RESTO)
             es_variante_none = "skip" in instruccion.lower()
             if not res["ok"]:
@@ -486,13 +499,19 @@ def resolver_web(url: str, headed: bool = False, salida: str = "",
                 "tiempo_s": round(time.monotonic() - t_inicio, 1)}
 
 
-def resolver_offline(imagen_ruta: str, n: int, instruccion: str) -> dict:
+def resolver_offline(imagen_ruta: str, n: int, instruccion: str,
+                     umbral_objetivo: float = None) -> dict:
     """Pipeline completo SIN navegador sobre una cuadricula guardada (pasada
-    por celda offline): celdas + RT-DETR batch (una carga) + decision."""
+    por celda offline): celdas + RT-DETR batch (una carga) + decision.
+
+    Incluye las detecciones por celda en el resultado (P0.1: reportar los
+    scores para ajustar el umbral con datos reales)."""
     from PIL import Image
 
     from captcha_ia import aumentar_escala, celdas_grid, resolver
 
+    if umbral_objetivo is None:
+        umbral_objetivo = umbral_objetivo_para(n)
     imagen = Image.open(imagen_ruta)
     celdas_pil = [(f, c, aumentar_escala(celda))
                   for f, c, celda in celdas_grid(imagen, n=n)]
@@ -502,8 +521,13 @@ def resolver_offline(imagen_ruta: str, n: int, instruccion: str) -> dict:
         return detecciones.get((fila, col), [])
 
     res = resolver(imagen, instruccion, detectar_celda, n=n,
-                   umbral_objetivo=UMBRAL_OBJETIVO, umbral_resto=UMBRAL_RESTO)
+                   umbral_objetivo=umbral_objetivo, umbral_resto=UMBRAL_RESTO)
     res["celdas_detectadas"] = sum(1 for v in detecciones.values() if v)
+    res["umbral_objetivo"] = umbral_objetivo
+    res["detecciones_por_celda"] = {
+        f"{f},{c}": detecciones.get((f, c), [])
+        for f, c, _ in celdas_pil
+    }
     return res
 
 
@@ -526,12 +550,16 @@ def main() -> None:
                         help="tiempo maximo total en segundos")
     parser.add_argument("--max-intentos", type=int, default=3,
                         help="reintentos tras re-render del reto")
+    parser.add_argument("--umbral-objetivo", type=float, default=None,
+                        help="umbral de la clase objetivo (default por tamano: "
+                             "0.45 en 3x3, 0.30 en 4x4; leccion 20 hallazgo 4)")
     args = parser.parse_args()
 
     if args.offline:
         if not args.n or not args.instruccion:
             parser.error("--offline requiere --n y --instruccion")
-        resultado = resolver_offline(args.offline, args.n, args.instruccion)
+        resultado = resolver_offline(args.offline, args.n, args.instruccion,
+                                     umbral_objetivo=args.umbral_objetivo)
         print(json.dumps(resultado, ensure_ascii=False, indent=2))
         return
     if not args.url:
@@ -539,7 +567,8 @@ def main() -> None:
 
     resultado = resolver_web(args.url, headed=args.headed,
                              salida=args.salida, timeout_s=args.timeout,
-                             max_intentos=args.max_intentos)
+                             max_intentos=args.max_intentos,
+                             umbral_objetivo=args.umbral_objetivo)
     print(json.dumps(resultado, ensure_ascii=False, indent=2))
 
 

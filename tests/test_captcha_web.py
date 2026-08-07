@@ -5,7 +5,7 @@ valida en vivo). Ejecutar: python3 -m unittest discover -s tests -v
 
 import unittest
 
-from captcha_web import indice_a_fila_col, n_desde_tiles
+from captcha_web import indice_a_fila_col, n_desde_tiles, umbral_objetivo_para
 
 
 class TestNDesdeTiles(unittest.TestCase):
@@ -29,6 +29,14 @@ class TestIndiceAFilaCol(unittest.TestCase):
         self.assertEqual(indice_a_fila_col(3, 3), (1, 0))
         self.assertEqual(indice_a_fila_col(8, 3), (2, 2))
         self.assertEqual(indice_a_fila_col(15, 4), (3, 3))
+
+
+class TestUmbralObjetivo(unittest.TestCase):
+    def test_adaptativo_por_tamano(self):
+        # leccion 20 hallazgo 4: los tiles 4x4 (mas chicos) puntuan mas bajo
+        # (motos reales 0.24-0.28); 3x3 conserva 0.45
+        self.assertEqual(umbral_objetivo_para(3), 0.45)
+        self.assertEqual(umbral_objetivo_para(4), 0.30)
 
 
 if __name__ == "__main__":
