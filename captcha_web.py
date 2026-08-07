@@ -171,14 +171,19 @@ def detectar_batch_worker(celdas_pil: list) -> dict:
 
 def leer_instruccion(bframe) -> str:
     """Texto de la instruccion del reto (desc del DOM). count() evita el
-    auto-wait de 30 s de Playwright cuando el elemento no existe."""
+    auto-wait de 30 s de Playwright cuando el elemento no existe; el desc
+    puede renderizarse un instante despues de la cuadricula (se reintenta)."""
     locator = bframe.locator(SELEC_INSTRUCCION)
-    if locator.count() == 0:
-        return ""
-    try:
-        return locator.first.inner_text().strip()
-    except Exception:
-        return ""
+    for _ in range(5):
+        if locator.count() > 0:
+            try:
+                texto = locator.first.inner_text().strip()
+                if texto:
+                    return texto
+            except Exception:
+                pass
+        time.sleep(0.4)
+    return ""
 
 
 def worker_ocr_texto(rutas: list) -> dict:
