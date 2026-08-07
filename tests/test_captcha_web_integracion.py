@@ -242,6 +242,37 @@ class TestOrquestadorLocal(unittest.TestCase):
             pulsados = json.loads(r.read().decode())
         self.assertEqual(pulsados, [])
 
+    def test_fallback_vlm_cuando_worker_no_encuentra_nada(self):
+        """Worker sin detecciones (clase no-COCO): el orquestador parsea la
+        clase de la instruccion y llama al hook fallback_vlm(celdas, clase);
+        sus detecciones alimentan el decisor y los clics."""
+        import captcha_web
+
+        Handler.clics = []
+        Handler.desc_alternativa = "select all crosswalks"
+        self.addCleanup(setattr, Handler, "desc_alternativa", "")
+        url = f"http://127.0.0.1:{self.puerto}/"
+
+        def stub_detector(celdas_pil):
+            return {}  # RT-DETR no ve crosswalks: clase no-COCO
+
+        llamadas = []
+
+        def stub_vlm(celdas_pil, clase):
+            llamadas.append(clase)
+            return {(1, 1): [{"clase": clase, "score": 1.0}]}
+
+        res = captcha_web.resolver_web(url, detectar_lote=stub_detector,
+                                       fallback_vlm=stub_vlm, timeout_s=60)
+        self.assertTrue(res["ok"], res)
+        self.assertEqual(res["veredicto"], "ok")
+        self.assertEqual(llamadas, ["crosswalk"])
+        self.assertEqual(sorted(res["seleccion"]), [(1, 1)])
+        with urllib.request.urlopen(
+                f"http://127.0.0.1:{self.puerto}/clics.json") as r:
+            pulsados = json.loads(r.read().decode())
+        self.assertEqual(pulsados, [4])  # (1,1)
+
 
 if __name__ == "__main__":
     unittest.main()
