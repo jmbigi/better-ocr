@@ -22,11 +22,12 @@
 
 Informe completo: `/var/tmp/better-ocr-bench/reporte.json`.
 
-## 3. Cascada de gráficos (set de 8 charts, ground truth propio)
+## 3. Cascada de gráficos (set de 9 charts, ground truth propio)
 
 | Chart | Fast path (PP-OCRv6) | Fallback ChartParsing |
 |---|---|---|
 | bar_2series (mpl) | 6/6 + 12/12 (~70 s, 1 GB) | — |
+| bar_line_mixto (mpl) | rechaza (52.5 s) | **pendiente** (fallback VLM no ejecutado) |
 | plotly_barra | 6/6 + 12/12 (~58 s) | — |
 | grafico_demo (oficial) | rechaza (seguro) | 18/18 (~333 s, 5.2 GB) |
 | pie_5 | rechaza | 5/5 + 5/5 (~209 s) |
@@ -87,6 +88,7 @@ VRAM.
 ## Limitaciones verificadas
 
 - Scatter: no soportado por ChartParsing (alucina).
+- Gráfico mixto barras+línea (`bar_line_mixto`): el fast path lo rechaza (esperado: la línea mezcla las columnas del emparejado geométrico). El fallback VLM queda **pendiente de validar**: el reintento en esta máquina abortó (SIGABRT) porque `LD_LIBRARY_PATH` trae el cudnn 9.1 del pyenv por delante (lección 17); para reintentarlo hay que anteponer los `nvidia/*/lib` del venv, quitar las rutas nvidia del pyenv y no correr dos instancias VLM a la vez.
 - Captions/pinturas: requieren VLM ≥ 0.9B (~9 GB) → OOM en equipos de 7 GB.
 - qwen2.5vl:7b en CPU: deja la RAM del host crítica; descargar con `keep_alive=0`.
 - Portabilidad: solo probado en Linux/x86 (CPU 7.7 GB; GPU RTX 3070 8 GB validada en lección 17).
