@@ -654,9 +654,15 @@ def _aplicar_fallback_vlm(detecciones: dict, celdas_pil: list, clase: str,
     inciertas = [(f, c, celda) for (f, c, celda) in celdas_pil
                  if not detecciones.get((f, c), [])]
     if not candidatas:
-        if any(detecciones.values()):
-            return detecciones  # hay detecciones pero no de la clase: sin confirmar
-        return fallback_vlm(celdas_pil, clase) or detecciones
+        # Sin candidatos del objetivo: el VLM cubre TODAS las celdas — la
+        # clase puede ser no-COCO con otras detecciones presentes (medido en
+        # vivo: 'mountains or hills' con bicycles/cars detectados); devolver
+        # sin preguntar dejaba seleccion vacia y VERIFY ignorado en silencio.
+        # Se FUSIONA con las detecciones del worker (no se reemplazan).
+        encontradas = fallback_vlm(celdas_pil, clase) or {}
+        for (f, c), dets in encontradas.items():
+            detecciones.setdefault((f, c), []).extend(dets)
+        return detecciones
     confirmadas = fallback_vlm(candidatas, clase) or {}
     for (f, c, _) in candidatas:
         if (f, c) not in confirmadas:

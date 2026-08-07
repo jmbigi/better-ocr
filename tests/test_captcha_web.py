@@ -140,12 +140,22 @@ class TestAplicarFallbackVLM(unittest.TestCase):
         self.assertEqual(recibidas, [9])
         self.assertEqual(res[(1, 1)][0]["clase"], "crosswalk")
 
-    def test_detecciones_sin_la_clase_no_llama_al_vlm(self):
-        det = {(0, 0): [{"clase": "car", "score": 0.8}]}
-        res = _aplicar_fallback_vlm(det, self._celdas(), "bus", 0.45,
-                                    lambda celdas, clase: (_ for _ in ()).throw(
-                                        AssertionError("no debe llamarse")))
-        self.assertEqual(res, det)
+    def test_detecciones_de_otras_clases_si_llama_al_vlm(self):
+        # 'mountains or hills' con bicycles/cars detectados (medido en vivo
+        # 2026-08-07): sin candidatos del objetivo, el VLM cubre TODAS las
+        # celdas (la clase puede ser no-COCO entre detecciones COCO)
+        det = {(0, 0): [{"clase": "bicycle", "score": 0.8}]}
+        recibidas = []
+
+        def vlm(celdas, clase):
+            recibidas.append((clase, len(celdas)))
+            return {(1, 1): [{"clase": "mountains or hills", "score": 1.0}]}
+
+        res = _aplicar_fallback_vlm(det, self._celdas(), "mountains or hills",
+                                    0.45, vlm)
+        self.assertEqual(recibidas, [("mountains or hills", 9)])
+        self.assertEqual(res[(1, 1)][0]["clase"], "mountains or hills")
+        self.assertEqual(res[(0, 0)][0]["clase"], "bicycle")  # se conserva
 
     def test_sin_fallback_no_cambia_nada(self):
         det = {(0, 1): [{"clase": "bus", "score": 0.9}]}
