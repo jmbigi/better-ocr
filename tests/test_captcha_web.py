@@ -3,9 +3,12 @@
 valida en vivo). Ejecutar: python3 -m unittest discover -s tests -v
 """
 
+import json
 import os
 import unittest
 from unittest import mock
+
+import captcha_web
 
 from captcha_web import (
     _aplicar_fallback_vlm,
@@ -167,6 +170,37 @@ class TestResolverOffline(unittest.TestCase):
         self.assertTrue(res["ok"], res)
         self.assertEqual(res["seleccion"], [])
         self.assertEqual(res["celdas_detectadas"], 0)
+
+
+class TestPreguntarOllama(unittest.TestCase):
+    def test_payload_del_api_generate(self):
+        """Contrato de la API /api/generate: modelo, prompt binario, imagen
+        en base64, temperatura 0 (determinista) y sin stream."""
+        from PIL import Image
+        import base64 as b64mod
+
+        with mock.patch("captcha_web.urllib.request.urlopen") as urlopen:
+            urlopen.return_value.__enter__.return_value.read.return_value = \
+                b'{"response": "YES"}'
+            texto = captcha_web._preguntar_ollama(
+                Image.new("RGB", (20, 20), (255, 0, 0)), "bus",
+                "127.0.0.1", "gemma3:4b", 90)
+
+        self.assertEqual(texto, "YES")
+        req = urlopen.call_args[0][0]
+        self.assertIn("http://127.0.0.1:11434/api/generate", req.full_url)
+        cuerpo = json.loads(req.data.decode())
+        self.assertEqual(cuerpo["model"], "gemma3:4b")
+        self.assertIn("bus", cuerpo["prompt"])
+        self.assertIn("yes or no", cuerpo["prompt"].lower())
+        self.assertEqual(cuerpo["options"]["temperature"], 0)
+        self.assertIs(cuerpo["stream"], False)
+        # la imagen viaja en base64 PNG
+        b64 = cuerpo["images"][0]
+        self.assertIsInstance(b64, str)
+        import io
+        self.assertEqual(
+            Image.open(io.BytesIO(b64mod.b64decode(b64))).size, (20, 20))
 
 
 class TestUmbralObjetivo(unittest.TestCase):
