@@ -161,8 +161,12 @@ def parsear_instruccion(texto: str):
     t = texto.strip().lower()
     t = re.sub(r"\s+", " ", t)
 
-    if RE_SKIP.search(t):
-        return None
+    # NOTA: "click skip" NO es un retorno temprano — puede venir DESPUES de
+    # una clase real ("Select all squares with motorcycles If there are
+    # none, click skip" -> 'motorcycle'; el SKIP solo aplica si no hay
+    # clase o no se detecta nada, decision del orquestador con
+    # es_variante_none). El camino normal ya devuelve None para las
+    # instrucciones de skip puro (multi-word guard).
 
     m = RE_CONDICION.match(t)
     if m:
@@ -225,7 +229,8 @@ def parsear_instruccion(texto: str):
     if canonico in {"image", "images", "picture", "pictures", "photo",
                     "photos", "tile", "tiles", "square", "squares", "here",
                     "this", "these", "those", "them", "all", "everything",
-                    "none", "object", "objects", "her", "him", "it"}:
+                    "none", "object", "objects", "her", "him", "it", "skip",
+                    "verify", "click", "press"}:
         return None
     return canonico
 

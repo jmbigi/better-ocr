@@ -115,6 +115,14 @@ class TestParsearInstruccion(unittest.TestCase):
             with self.subTest(texto=texto):
                 self.assertIsNone(parsear_instruccion(texto))
 
+    def test_skip_con_clase_previa_no_anula_la_clase(self):
+        # reto real en vivo (2026-08-07 run v4): "motorcycles If there are
+        # none, click skip" tiene clase real -> 'motorcycle' (el SKIP solo
+        # aplica si no se detecta nada; decision del orquestador)
+        self.assertEqual(parsear_instruccion(
+            "Select all squares with motorcycles If there are none, click skip"),
+            "motorcycle")
+
     def test_verify_no_se_confunde_con_skip(self):
         self.assertEqual(parsear_instruccion(
             "Select all images with bicycles Click verify once there are none left"),
