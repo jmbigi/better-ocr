@@ -123,6 +123,30 @@ class TestParsearInstruccion(unittest.TestCase):
             "Select all squares with motorcycles If there are none, click skip"),
             "motorcycle")
 
+    def test_corpus_real_de_instrucciones_en_vivo(self):
+        # las 12 instrucciones unicas vistas en los 17 runs en vivo contra
+        # la demo oficial (2026-08-07): regresion contra la distribucion real
+        corpus = {
+            "Select all images with cars": "car",
+            "Select all images with a bus": "bus",
+            "Select all images with motorcycles": "motorcycle",
+            "Select all images with bicycles": "bicycle",
+            "Select all squares with traffic lights": "traffic light",
+            "Select all squares with motorcycles": "motorcycle",
+            "Select all squares with buses If there are none, click skip": "bus",
+            "Select all squares with motorcycles If there are none, click skip": "motorcycle",
+            "Select all images with crosswalks Click verify once there are none left.": "crosswalk",
+            "Select all images with a fire hydrant Click verify once there are none left.": "fire hydrant",
+            "Select all images with bicycles Click verify once there are none left": "bicycle",
+            "Select all images with mountains or hills": "mountains or hills",
+        }
+        for texto, esperado in corpus.items():
+            with self.subTest(texto=texto):
+                self.assertEqual(parsear_instruccion(texto), esperado)
+        # con salto de linea real del DOM
+        self.assertEqual(parsear_instruccion("Select all images with\ncars"),
+                         "car")
+
     def test_verify_no_se_confunde_con_skip(self):
         self.assertEqual(parsear_instruccion(
             "Select all images with bicycles Click verify once there are none left"),
