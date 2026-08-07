@@ -80,6 +80,9 @@ python3 captcha_ia.py --local            # 3x3; usa --n 4 para 4x4
 
 # 3f. Captcha: modo REAL con Playwright (python del sistema)
 python3 captcha_web.py --url https://pagina.con.recaptcha --salida /var/tmp/reto
+
+# 3g. Captcha: fallback VLM para clases no-COCO (crosswalks, stairs...)
+python3 captcha_web.py --url https://pagina.con.recaptcha --vlm-fallback
 ```
 
 ## Perfiles por máquina (visión)
