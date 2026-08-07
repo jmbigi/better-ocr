@@ -236,4 +236,6 @@
 - **GPU con cudnn correcto:** el env de la lección 17 (anteponer `nvidia/*/lib` del venv, quitar rutas nvidia del pyenv) — el VLM corre en GPU, más rápido, pero los tiempos de referencia de la lección 14 eran CPU.
 - No hay forma de pasar `device` real al predictor desde el wrapper de paddleocr (el `engine_config` con `paddle_dynamic` + `device_type`/`device_id` no se expone por `ChartParsing(...)`).
 
+**Verificación del fix (2026-08-07, sin inferencia, venv del proyecto):** con `CUDA_VISIBLE_DEVICES=""` → `paddle.device.get_device()` devuelve `cpu`; sin la variable → `gpu:0`. El mecanismo de aislamiento queda confirmado; falta solo reejecutar A4 con el VLM para validarlo de punta a punta.
+
 **Lección:** "device=cpu" en la API de alto nivel de paddleocr no es garantía de CPU para los modelos DocVLM; verificar el dispositivo real con `paddle.device.get_device()` dentro del proceso y aislar con `CUDA_VISIBLE_DEVICES` cuando se exija CPU.
