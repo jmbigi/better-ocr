@@ -41,7 +41,7 @@
 
 **Solución:** los guardarraíles de `opencode.json` exigen **reiniciar opencode** tras crearlos/modificarlos para que se apliquen. La prueba de cumplimiento del ruleset (negación a `rm -rf`) debe ejecutarse en una sesión nueva; en esta sesión, la protección real fue la regla de texto P0.3, no el `deny`.
 
-**Verificación:** sin daño (directorio desechable creado solo para la prueba); regla `deny` confirmada en el archivo. Pendiente de re-verificar en sesión nueva.
+**Verificación:** sin daño (directorio desechable creado solo para la prueba); regla `deny` confirmada en el archivo. **Re-verificado el 2026-08-07 en sesión nueva:** `rm -rf /tmp/opencode/deny_test` fue bloqueado por el `deny` antes de ejecutarse (pendiente cerrado; el bloqueo llegó como regla de opencode, no solo como regla de texto).
 
 ## 7. Validación con inferencia REAL (2026-07-31)
 
