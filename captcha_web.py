@@ -21,12 +21,16 @@ Uso:
     python3 captcha_web.py --url ... --headed --salida /var/tmp/reto/
 """
 
+import base64
 import json
 import os
+import re
+import socket
 import subprocess
 import sys
 import tempfile
 import time
+import urllib.request
 
 SELEC_INSTRUCCION = (
     "#rc-imageselect .rc-imageselect-desc, "
@@ -63,6 +67,102 @@ def umbral_objetivo_para(n: int) -> float:
     los scores por celda se reportan (resolver_offline) para ajustar con
     datos reales via --umbral-objetivo."""
     return 0.45 if n == 3 else 0.30
+
+
+RE_VLM_SI = re.compile(r"\b(yes|y)\b", re.IGNORECASE)
+RE_VLM_NO = re.compile(r"\bno\b", re.IGNORECASE)
+
+
+def parsear_respuesta_vlm(texto: str):
+    """Interpreta la respuesta binaria del VLM: True (si) | False (no) |
+    None (indeterminada). Tolerante a variaciones de formato."""
+    if not texto:
+        return None
+    t = texto.strip().lower()
+    if RE_VLM_SI.search(t) and not RE_VLM_NO.search(t):
+        return True
+    if RE_VLM_NO.search(t) and not RE_VLM_SI.search(t):
+        return False
+    return None
+
+
+def _garantizar_ollama(host: str = "127.0.0.1", puerto: int = 11434,
+                       binario: str = ""):
+    """Arranca el servidor ollama bajo demanda si no responde (mismo patron
+    que scripts/bateria_360.py; no es un servicio permanente)."""
+    try:
+        with socket.create_connection((host, puerto), timeout=2):
+            return True
+    except OSError:
+        pass
+    binario = binario or os.path.expanduser("~/ollama/bin/ollama")
+    if not os.path.exists(binario):
+        import shutil
+        binario = shutil.which("ollama") or binario
+    if not os.path.exists(binario):
+        return False
+    try:
+        subprocess.Popen([binario, "serve"],
+                         stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                         start_new_session=True)
+    except OSError:
+        return False
+    for _ in range(30):
+        try:
+            with socket.create_connection((host, puerto), timeout=2):
+                return True
+        except OSError:
+            time.sleep(2)
+    return False
+
+
+def _preguntar_ollama(imagen_pil, clase: str, host: str, modelo: str,
+                      timeout_s: float) -> str:
+    """Una pregunta binaria por celda: 'Does this image contain <clase>?
+    Answer only yes or no.' Devuelve el texto crudo del modelo."""
+    from PIL import Image
+
+    import io
+
+    buf = io.BytesIO()
+    imagen_pil.save(buf, format="PNG")
+    b64 = base64.b64encode(buf.getvalue()).decode()
+    prompt = (f"Does this image contain {clase}? "
+              "Answer only yes or no.")
+    cuerpo = json.dumps({
+        "model": modelo, "prompt": prompt, "images": [b64], "stream": False,
+        "options": {"temperature": 0},
+    }).encode()
+    req = urllib.request.Request(
+        f"http://{host}:11434/api/generate", data=cuerpo,
+        headers={"Content-Type": "application/json"})
+    with urllib.request.urlopen(req, timeout=timeout_s) as r:
+        return json.loads(r.read().decode()).get("response", "")
+
+
+def fallback_vlm_ollama(celdas_pil: list, clase_objetivo: str = None,
+                        host: str = "127.0.0.1", modelo: str = "gemma3:4b",
+                        timeout_s: float = 90.0) -> dict:
+    """Re-evalua las celdas con un VLM local (ollama). Pregunta binaria por
+    celda — mas acotada que 'select all tiles with X', que sobre-selecciona
+    (leccion 20). Devuelve {(fila, col): [{"clase", "score": 1.0}]} para las
+    celdas con respuesta 'si'; las demas quedan vacias (el decisor las
+    trata como inciertas). Sin clase_objetivo no se puede preguntar: {}."""
+    if not clase_objetivo or not celdas_pil:
+        return {}
+    if not _garantizar_ollama(host):
+        return {}
+    resultado = {}
+    for fila, col, imagen in celdas_pil:
+        try:
+            texto = _preguntar_ollama(imagen, clase_objetivo, host, modelo,
+                                      timeout_s)
+            if parsear_respuesta_vlm(texto) is True:
+                resultado[(fila, col)] = [{"clase": clase_objetivo,
+                                           "score": 1.0}]
+        except Exception:
+            continue  # celda fallida: queda incierta
+    return resultado
 
 VENV_PYTHON = os.path.join(os.path.dirname(os.path.abspath(__file__)),
                            ".venv", "bin", "python")
@@ -440,10 +540,13 @@ def resolver_web(url: str, headed: bool = False, salida: str = "",
                           for f, c, celda in celdas_grid(imagen, n=n)]
             detecciones = detectar_lote(celdas_pil)
             if not any(detecciones.values()):
-                # el worker fallo (o el reto se re-renderizo a mitad):
-                # no pulsar a ciegas
-                if fallback_vlm is not None and bframe.locator(SELEC_TILES).count() >= 4:
-                    detecciones = fallback_vlm(celdas_pil)
+                # el worker fallo, el reto se re-renderizo a mitad, o la
+                # clase no es COCO (crosswalks/stairs): no pulsar a ciegas
+                if fallback_vlm is not None:
+                    from captcha_ia import parsear_instruccion
+                    clase = parsear_instruccion(instruccion)
+                    if clase and bframe.locator(SELEC_TILES).count() >= 4:
+                        detecciones = fallback_vlm(celdas_pil, clase)
                 if not any(detecciones.values()):
                     continue  # reintentar con la nueva captura
 
@@ -553,6 +656,12 @@ def main() -> None:
     parser.add_argument("--umbral-objetivo", type=float, default=None,
                         help="umbral de la clase objetivo (default por tamano: "
                              "0.45 en 3x3, 0.30 en 4x4; leccion 20 hallazgo 4)")
+    parser.add_argument("--vlm-fallback", action="store_true",
+                        help="celdas sin deteccion COCO re-evaluadas por un "
+                             "VLM local (ollama gemma3:4b, arrancado bajo "
+                             "demanda; pregunta binaria por celda)")
+    parser.add_argument("--vlm-modelo", default="gemma3:4b",
+                        help="modelo ollama para --vlm-fallback")
     args = parser.parse_args()
 
     if args.offline:
@@ -565,10 +674,17 @@ def main() -> None:
     if not args.url:
         parser.error("se requiere --url (modo real) o --offline IMAGEN")
 
+    if args.vlm_fallback:
+        import functools
+        fallback_vlm = functools.partial(fallback_vlm_ollama,
+                                         modelo=args.vlm_modelo)
+    else:
+        fallback_vlm = None
     resultado = resolver_web(args.url, headed=args.headed,
                              salida=args.salida, timeout_s=args.timeout,
                              max_intentos=args.max_intentos,
-                             umbral_objetivo=args.umbral_objetivo)
+                             umbral_objetivo=args.umbral_objetivo,
+                             fallback_vlm=fallback_vlm)
     print(json.dumps(resultado, ensure_ascii=False, indent=2))
 
 
