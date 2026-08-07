@@ -73,6 +73,32 @@ def bar_2series() -> None:
     guardar(fig, "bar_2series.png", filas)
 
 
+def bar_line_mixto() -> None:
+    """Caso de uso central del proyecto: barras + linea superpuesta (mixto).
+
+    Mismos datos que bar_2series (CSV identico) para comparar la cascada
+    directamente: la linea anade texto solapado que reta al fast path.
+    """
+    x = np.arange(len(ANIOS))
+    fig, ax = plt.subplots(figsize=(9, 6))
+    ax.bar(x - 0.2, REVENUE, width=0.4, color="tab:blue", label="Revenue (M)")
+    ax.plot(x + 0.2, PROFIT, marker="o", color="tab:red", label="Profit (M)")
+    for i, r in enumerate(REVENUE):
+        ax.text(i - 0.2, r + 2, f"{r}", ha="center", fontsize=11)
+    for i, p in enumerate(PROFIT):
+        # los negativos se etiquetan DEBAJO del punto (hallazgo 5)
+        ax.text(i + 0.2, p - 2 if p < 0 else p + 2, f"{p}",
+                ha="center", fontsize=11)
+    ax.set_xticks(x, ANIOS)
+    ax.axhline(0, color="black", linewidth=0.8)
+    ax.legend()
+    ax.set_title("Revenue and Profit (M)")
+    fig.subplots_adjust(bottom=0.12)
+    filas = [["anio", "revenue", "profit"]] + [
+        [a, r, p] for a, r, p in zip(ANIOS, REVENUE, PROFIT)]
+    guardar(fig, "bar_line_mixto.png", filas)
+
+
 def line_3series() -> None:
     meses = [f"M{i}" for i in range(1, 9)]
     rng = np.random.default_rng(7)
@@ -184,6 +210,7 @@ def plotly_barra() -> None:
 def main() -> None:
     os.makedirs(DIR, exist_ok=True)
     bar_2series()
+    bar_line_mixto()
     line_3series()
     pie_5()
     bar_apilada()
