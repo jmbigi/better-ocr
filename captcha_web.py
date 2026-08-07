@@ -57,6 +57,14 @@ UMBRAL_RESTO = 0.6
 TIEMPO_ESPERA_RETO = 20.0
 TIEMPO_ESPERA_VEREDICTO = 15.0
 
+# Clases donde la pasada de recall del VLM queda EXCLUIDA (datos en vivo
+# 2026-08-07, 23 runs): en car, 2/2 fallos coincidieron con una celda VLM
+# anadida en celda vacia (v4/v8, seleccion de 5 en vez de 4) mientras las
+# 3 victorias de car fueron sin celdas VLM; en el resto (motorcycle,
+# bicycle, traffic light) las celdas VLM fueron correctas (t1/t4/t6, 2-3
+# celdas cada uno, ok). La confirmacion de candidatos SI se mantiene.
+SIN_RECALL_CLASES = {"car"}
+
 
 def umbral_objetivo_para(n: int) -> float:
     """Umbral de la clase objetivo segun el tamano de la cuadricula.
@@ -671,8 +679,10 @@ def _aplicar_fallback_vlm(detecciones: dict, celdas_pil: list, clase: str,
     for (f, c, _) in candidatas:
         if (f, c) not in confirmadas:
             detecciones[(f, c)] = []
-    # pasada extra sobre las celdas sin ninguna deteccion (recall)
-    if recall and inciertas:
+    # pasada extra sobre las celdas sin ninguna deteccion (recall), salvo
+    # para las clases de SIN_RECALL_CLASES (politica por clase, datos en
+    # vivo: en 'car' las celdas VLM coincidieron con 2/2 fallos)
+    if recall and clase not in SIN_RECALL_CLASES and inciertas:
         encontradas = fallback_vlm(inciertas, clase) or {}
         for (f, c, _) in inciertas:
             if (f, c) in encontradas:

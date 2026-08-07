@@ -177,6 +177,23 @@ class TestAplicarFallbackVLM(unittest.TestCase):
         self.assertEqual(recibidas, [1])  # solo candidatos, sin vacias
         self.assertEqual(res[(0, 1)][0]["clase"], "bus")
 
+    def test_recall_excluido_por_clase_car(self):
+        # politica por clase (datos en vivo: car 2/2 fallos con celda VLM):
+        # en 'car' la pasada de recall no se hace; en 'bus' si
+        det = {(0, 1): [{"clase": "car", "score": 0.9}]}
+        recibidas = []
+
+        def vlm(celdas, clase):
+            recibidas.append(clase)
+            return {}
+
+        _aplicar_fallback_vlm(det, self._celdas(), "car", 0.45, vlm)
+        self.assertEqual(recibidas, ["car"])  # solo candidatos (1 llamada)
+        recibidas.clear()
+        det_bus = {(0, 1): [{"clase": "bus", "score": 0.9}]}
+        _aplicar_fallback_vlm(det_bus, self._celdas(), "bus", 0.45, vlm)
+        self.assertEqual(len(recibidas), 2)  # candidatos + recall
+
 
 class TestResolverOffline(unittest.TestCase):
     def _ruta_grid(self):
