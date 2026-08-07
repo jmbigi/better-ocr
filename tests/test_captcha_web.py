@@ -163,6 +163,21 @@ class TestAplicarFallbackVLM(unittest.TestCase):
         self.assertEqual(res, det)
 
 
+    def test_recall_desactivable(self):
+        # --sin-vlm-recall: la pasada sobre celdas vacias no se hace
+        det = {(0, 1): [{"clase": "bus", "score": 0.9}]}
+        recibidas = []
+
+        def vlm(celdas, clase):
+            recibidas.append(len(celdas))
+            return {(0, 1): [{"clase": "bus", "score": 1.0}]}
+
+        res = _aplicar_fallback_vlm(det, self._celdas(), "bus", 0.45, vlm,
+                                    recall=False)
+        self.assertEqual(recibidas, [1])  # solo candidatos, sin vacias
+        self.assertEqual(res[(0, 1)][0]["clase"], "bus")
+
+
 class TestResolverOffline(unittest.TestCase):
     def _ruta_grid(self):
         import tempfile

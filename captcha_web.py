@@ -433,7 +433,8 @@ def veredicto(pagina, bframe) -> str:
 def resolver_web(url: str, headed: bool = False, salida: str = "",
                  timeout_s: float = 150.0, max_intentos: int = 3,
                  fallback_vlm=None, detectar_lote=None,
-                 ocr_fallback=None, umbral_objetivo: float = None) -> dict:
+                 ocr_fallback=None, umbral_objetivo: float = None,
+                 vlm_recall: bool = True) -> dict:
     """Ciclo completo real: checkbox -> reto -> instruccion -> tiles ->
     VERIFY/SKIP -> veredicto, con reintento tras re-render del reto.
 
@@ -549,7 +550,7 @@ def resolver_web(url: str, headed: bool = False, salida: str = "",
                     detecciones = _aplicar_fallback_vlm(
                         detecciones, celdas_pil, clase,
                         umbral_objetivo or umbral_objetivo_para(n),
-                        fallback_vlm)
+                        fallback_vlm, recall=vlm_recall)
             if not any(detecciones.values()) and not es_variante_none:
                 # el worker fallo o el reto se re-renderizo a mitad, o la
                 # clase no es COCO y el VLM tampoco encontro nada: no pulsar
@@ -625,21 +626,24 @@ def resolver_web(url: str, headed: bool = False, salida: str = "",
         return {"ok": False, "error": "sin exito tras varios intentos",
                 "veredicto": resultado or "pendiente",
                 "clase_objetivo": res.get("clase_objetivo"),
+                "seleccion": sorted(res.get("seleccion", [])),
                 "instruccion": instruccion,
                 "intento": max_intentos,
                 "tiempo_s": round(time.monotonic() - t_inicio, 1)}
 
 
 def _aplicar_fallback_vlm(detecciones: dict, celdas_pil: list, clase: str,
-                          umbral: float, fallback_vlm) -> dict:
-    """Dos etapas + cobertura de huecos (patron DDG validado en vivo):
+                          umbral: float, fallback_vlm, recall: bool = True) -> dict:
+    """Dos etapas + cobertura de huecos opcional (patron DDG validado en vivo):
 
     1. Los candidatos de la clase objetivo del worker se confirman/descartan
        con el VLM binario por tile (4 'birds' -> 3 ducks).
-    2. Las celdas SIN NINGUNA deteccion (recall de tiles pequenos, medido en
-       vivo 2026-08-07: 13/16 celdas vacias en un 4x4 de traffic lights) se
-       re-evaluan con el mismo VLM: puede encontrar objetos que el detector
-       perdio.
+    2. Si recall=True, las celdas SIN NINGUNA deteccion se re-evaluan con el
+       mismo VLM (puede encontrar objetos que el detector perdio). MEDIDO EN
+       VIVO 2026-08-07: ayuda en clases dificiles (4x4 traffic lights: 2/3
+       celdas del VLM, reto resuelto) pero sobre-agrega en clases comunes
+       (cars: 2/2 runs con una 5a celda VLM erronea fueron rechazados; los
+       runs con solo RT-DETR pasaron) — configurable con --sin-vlm-recall.
     3. Si el worker no detecto nada (clase no-COCO), el VLM cubre todas las
        celdas.
 
@@ -668,7 +672,7 @@ def _aplicar_fallback_vlm(detecciones: dict, celdas_pil: list, clase: str,
         if (f, c) not in confirmadas:
             detecciones[(f, c)] = []
     # pasada extra sobre las celdas sin ninguna deteccion (recall)
-    if inciertas:
+    if recall and inciertas:
         encontradas = fallback_vlm(inciertas, clase) or {}
         for (f, c, _) in inciertas:
             if (f, c) in encontradas:
@@ -678,7 +682,7 @@ def _aplicar_fallback_vlm(detecciones: dict, celdas_pil: list, clase: str,
 
 def resolver_offline(imagen_ruta: str, n: int, instruccion: str,
                      umbral_objetivo: float = None,
-                     fallback_vlm=None) -> dict:
+                     fallback_vlm=None, vlm_recall: bool = True) -> dict:
     """Pipeline completo SIN navegador sobre una cuadricula guardada (pasada
     por celda offline): celdas + RT-DETR batch (una carga) + decision.
 
@@ -699,7 +703,8 @@ def resolver_offline(imagen_ruta: str, n: int, instruccion: str,
     if fallback_vlm is not None:
         clase = parsear_instruccion(instruccion)
         detecciones = _aplicar_fallback_vlm(detecciones, celdas_pil, clase,
-                                            umbral_objetivo, fallback_vlm)
+                                            umbral_objetivo, fallback_vlm,
+                                            recall=vlm_recall)
 
     def detectar_celda(_celda, fila, col):
         return detecciones.get((fila, col), [])
@@ -743,6 +748,10 @@ def main() -> None:
                              "demanda; pregunta binaria por celda)")
     parser.add_argument("--vlm-modelo", default="gemma3:4b",
                         help="modelo ollama para --vlm-fallback")
+    parser.add_argument("--sin-vlm-recall", action="store_true",
+                        help="desactiva la pasada de recall del VLM (celdas "
+                             "sin deteccion): ayuda en clases dificiles pero "
+                             "sobre-agrega en comunes (cars, medido en vivo)")
     args = parser.parse_args()
 
     if args.offline:
@@ -756,7 +765,8 @@ def main() -> None:
             fallback_vlm = None
         resultado = resolver_offline(
             args.offline, args.n, args.instruccion,
-            umbral_objetivo=args.umbral_objetivo, fallback_vlm=fallback_vlm)
+            umbral_objetivo=args.umbral_objetivo, fallback_vlm=fallback_vlm,
+            vlm_recall=not args.sin_vlm_recall)
         print(json.dumps(resultado, ensure_ascii=False, indent=2))
         return
     if not args.url:
@@ -772,7 +782,8 @@ def main() -> None:
                              salida=args.salida, timeout_s=args.timeout,
                              max_intentos=args.max_intentos,
                              umbral_objetivo=args.umbral_objetivo,
-                             fallback_vlm=fallback_vlm)
+                             fallback_vlm=fallback_vlm,
+                             vlm_recall=not args.sin_vlm_recall)
     print(json.dumps(resultado, ensure_ascii=False, indent=2))
 
 
