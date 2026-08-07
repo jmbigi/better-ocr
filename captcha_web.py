@@ -243,10 +243,14 @@ def capturar_cuadricula(bframe):
         return Image.open(ruta)
 def pulsar_tiles(bframe, seleccion: list, n: int) -> None:
     """Clic JS en cada tile seleccionado (el.click() evita el fallo
-    'outside of viewport' de los transforms anti-automatizacion)."""
+    'outside of viewport' de los transforms anti-automatizacion). Un tile
+    obsoleto (re-render) no aborta el resto."""
     for fila, col in seleccion:
         indice = fila * n + col
-        bframe.locator(SELEC_TILES).nth(indice).evaluate("el => el.click()")
+        try:
+            bframe.locator(SELEC_TILES).nth(indice).evaluate("el => el.click()")
+        except Exception:
+            continue
 
 
 def pulsar_verificar(bframe) -> None:
@@ -267,9 +271,16 @@ def pulsar_verificar(bframe) -> None:
 
 
 def pulsar_skip(bframe) -> bool:
-    """Pulsa SKIP si existe (instrucciones del tipo 'si no hay ninguna')."""
+    """Pulsa SKIP si existe (instrucciones del tipo 'si no hay ninguna').
+    Clic REAL primero (el JS a veces se ignora en silencio, hallazgo en vivo
+    de VERIFY) con JS como fallback."""
     try:
         if bframe.locator(SELEC_SKIP).count() > 0:
+            try:
+                bframe.locator(SELEC_SKIP).first.click(timeout=4000)
+                return True
+            except Exception:
+                pass
             bframe.locator(SELEC_SKIP).first.evaluate("el => el.click()")
             return True
     except Exception:
@@ -281,11 +292,17 @@ def veredicto(pagina, bframe) -> str:
     """Tras VERIFY: 'ok' | 'error' | 'pendiente' (espera acotada)."""
     t0 = time.monotonic()
     while time.monotonic() - t0 < TIEMPO_ESPERA_VEREDICTO:
-        if bframe.locator(SELEC_ERROR).count() > 0:
-            return "error"
+        try:
+            if bframe.locator(SELEC_ERROR).count() > 0:
+                return "error"
+        except Exception:
+            pass  # bframe en re-render (replaceimage): reintentar
         # si el bframe se cerro: exito
-        if not any("bframe" in (f.url or "") for f in pagina.frames):
-            return "ok"
+        try:
+            if not any("bframe" in (f.url or "") for f in pagina.frames):
+                return "ok"
+        except Exception:
+            pass
         # el ancla vive en el iframe de reCAPTCHA (no en frames[0])
         for f in pagina.frames:
             if "recaptcha" in (f.url or "") and f != pagina.main_frame:
@@ -330,7 +347,11 @@ def resolver_web(url: str, headed: bool = False, salida: str = "",
         contexto = navegador.new_context(locale="en-US",
                                          viewport={"width": 1280, "height": 900})
         pagina = contexto.new_page()
-        pagina.goto(url, timeout=30000)
+        try:
+            pagina.goto(url, timeout=30000)
+        except Exception as exc:
+            navegador.close()
+            return {"ok": False, "error": f"navegacion fallida: {exc}"}
         pagina.wait_for_timeout(1500)
 
         # 1) checkbox ancla dentro del iframe de reCAPTCHA
@@ -360,7 +381,11 @@ def resolver_web(url: str, headed: bool = False, salida: str = "",
         if marco_recaptcha is None:
             navegador.close()
             return {"ok": False, "error": "no se encontro el iframe de reCAPTCHA"}
-        marco_recaptcha.locator(SELEC_CHECKBOX).click()
+        try:
+            marco_recaptcha.locator(SELEC_CHECKBOX).click()
+        except Exception as exc:
+            navegador.close()
+            return {"ok": False, "error": f"clic del ancla fallido: {exc}"}
 
         # 2) esperar el reto en el iframe bframe
         t0 = time.monotonic()
@@ -393,7 +418,10 @@ def resolver_web(url: str, headed: bool = False, salida: str = "",
             n = tamano_cuadricula(bframe)
             if n is None:
                 continue  # re-render en curso: reintentar
-            imagen = capturar_cuadricula(bframe)
+            try:
+                imagen = capturar_cuadricula(bframe)
+            except Exception:
+                continue  # bframe en re-render: reintentar con la nueva captura
 
             # 4) resolucion: celdas + RT-DETR batch + decision
             celdas_pil = [(f, c, aumentar_escala(celda))
@@ -413,8 +441,13 @@ def resolver_web(url: str, headed: bool = False, salida: str = "",
             res = resolver(imagen, instruccion, detectar_celda, n=n,
                            umbral_objetivo=UMBRAL_OBJETIVO,
                            umbral_resto=UMBRAL_RESTO)
+            es_variante_none = "skip" in instruccion.lower()
             if not res["ok"]:
                 # instruccion no parseable: opcion conservadora = SKIP
+                pulsar_skip(bframe)
+            elif es_variante_none and not res["seleccion"]:
+                # "If there are none, click skip" y no detectamos el objeto:
+                # la respuesta correcta es SKIP, no VERIFY sin tiles
                 pulsar_skip(bframe)
             else:
                 pulsar_tiles(bframe, res["seleccion"], n)
@@ -429,15 +462,18 @@ def resolver_web(url: str, headed: bool = False, salida: str = "",
                 except Exception:
                     pass
             if resultado == "ok":
+                camino = "skip" if not res["ok"] else "tiles"
                 if salida:
                     with open(os.path.join(salida, "resultado.json"), "w",
                               encoding="utf-8") as f:
-                        json.dump({**res, "veredicto": resultado,
+                        json.dump({**res, "ok": True, "camino": camino,
+                                   "veredicto": resultado,
                                    "instruccion": instruccion,
                                    "intento": intento}, f,
                                   ensure_ascii=False, indent=2)
                 navegador.close()
-                return {**res, "veredicto": resultado,
+                return {**res, "ok": True, "camino": camino,
+                        "veredicto": resultado,
                         "instruccion": instruccion, "intento": intento,
                         "tiempo_s": round(time.monotonic() - t_inicio, 1)}
             # error o pendiente: el reto se re-renderiza; reintentar

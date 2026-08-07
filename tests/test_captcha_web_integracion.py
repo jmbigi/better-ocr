@@ -57,6 +57,9 @@ PAGINA_BFRAME = """<!doctype html><html><body>
     e.innerText = 'wrong';
     document.getElementById('rc-imageselect').appendChild(e);
   }}">Verify</button>
+<button onclick="parent.document.getElementById('marco-recaptcha').contentDocument
+  .getElementById('recaptcha-anchor')
+  .classList.add('recaptcha-checkbox-checked')">Skip</button>
 </body></html>"""
 
 CELDA = ('<td class="rc-imageselect-tile" '
@@ -68,6 +71,7 @@ class Handler(BaseHTTPRequestHandler):
 
     clics = []
     sin_desc = False
+    desc_alternativa = ""
     errores_antes_de_ok = 0
 
     def _responder(self, cuerpo, tipo="text/html; charset=utf-8"):
@@ -87,6 +91,8 @@ class Handler(BaseHTTPRequestHandler):
                 "<tr>" + "".join(CELDA.format(i=f * 3 + c) for c in range(3)) + "</tr>"
                 for f in range(3))
             desc = "" if Handler.sin_desc else (
+                f'<div class="rc-imageselect-desc">{Handler.desc_alternativa}</div>'
+                if Handler.desc_alternativa else
                 '<div class="rc-imageselect-desc">select all buses</div>')
             pagina = PAGINA_BFRAME.format(filas=filas, desc=desc,
                                           fallos=Handler.errores_antes_de_ok)
@@ -210,6 +216,31 @@ class TestOrquestadorLocal(unittest.TestCase):
                 f"http://127.0.0.1:{self.puerto}/clics.json") as r:
             pulsados = json.loads(r.read().decode())
         self.assertEqual(pulsados, [1, 6])  # (0,1) y (2,0)
+
+    def test_skip_cuando_instruccion_no_parseable(self):
+        """Instruccion sin clase ('Select all images' -> None): se pulsa
+        SKIP en lugar de VERIFY, sin tiles, y el reto se da por resuelto."""
+        import captcha_web
+
+        Handler.clics = []
+        Handler.desc_alternativa = "Select all images"
+        self.addCleanup(setattr, Handler, "desc_alternativa", "")
+        url = f"http://127.0.0.1:{self.puerto}/"
+
+        def stub_detector(celdas_pil):
+            # aunque el detector viera algo, no debe pulsarse ninguna tile
+            return {clave: [{"clase": "bus", "score": 0.9}]
+                    for clave in [(f, c) for f, c, _ in celdas_pil]}
+
+        res = captcha_web.resolver_web(url, detectar_lote=stub_detector,
+                                       timeout_s=60)
+        self.assertTrue(res["ok"], res)
+        self.assertEqual(res["veredicto"], "ok")
+        self.assertEqual(res["intento"], 1)
+        with urllib.request.urlopen(
+                f"http://127.0.0.1:{self.puerto}/clics.json") as r:
+            pulsados = json.loads(r.read().decode())
+        self.assertEqual(pulsados, [])
 
 
 if __name__ == "__main__":
