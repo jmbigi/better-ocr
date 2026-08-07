@@ -54,6 +54,8 @@ check "sintaxis: extractor_final.py" python3 -m py_compile extractor_final.py
 check "sintaxis: chart_server.py" python3 -m py_compile chart_server.py
 check "sintaxis: ocr_rapido.py" python3 -m py_compile ocr_rapido.py
 check "sintaxis: vision.py" python3 -m py_compile vision.py
+check "sintaxis: captcha_ia.py" python3 -m py_compile captcha_ia.py
+check "sintaxis: captcha_web.py" python3 -m py_compile captcha_web.py
 check "tests unitarios (stdlib + pandas)" python3 -m unittest discover -s tests -q
 
 echo "== 3. Config =="

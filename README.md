@@ -26,6 +26,8 @@ Crear un procedimiento documentado, reproducible y validado en ejecución real p
 | `extractor_final.py` | Script principal validado: extrae la tabla del gráfico con `ChartParsing` y genera `datos_extraidos.csv` + `salida_bruta.json` para depuración. Expone `obtener_markdown()`, `markdown_a_df()` y `validar_imagen()` (valida existencia + firma mágica antes de cargar el modelo) reutilizables. Por defecto usa la imagen demo (`ejemplos/grafico_demo.png`). |
 | `ocr_rapido.py` | **Ruta rápida en cascada:** PP-OCRv6 + emparejamiento geométrico por bboxes (año↔valor) con gate de plausibilidad. Si el gate falla, el llamador cae al VLM `ChartParsing` (lento pero exacto). Validado 12/12 valores en 2 charts en ~1 GB de RAM. |
 | `vision.py` | **CLI multi-modo de visión:** `auto` (clasifica y rutea), `texto` (PP-OCRv6), `graficos` (cascada), `doc` (PP-StructureV3 layout-only), `objetos` (RT-DETR-L) y `humano` (filtro clase person). Salidas json/csv/md. |
+| `captcha_ia.py` | **Resolución de retos reCAPTCHA v2 con el stack local (RT-DETR + VLM):** piezas puras testeables (parser de instrucción, geometría de cuadrícula, decisor por celda) + demo sintética determinista `--local` (3×3/4×4, sin navegador). El pipeline `resolver()` recibe un detector inyectable. |
+| `captcha_web.py` | **Orquestador real con Playwright:** checkbox → reto en bframe → instrucción del DOM → captura → detección RT-DETR por celda (subproceso por lotes del venv) → clics JS en tiles → VERIFY/SKIP → veredicto por el checkbox ancla. Reintento tras re-render. `python3 captcha_web.py --url <pagina> [--headed] [--salida dir]`. Requiere playwright en el python del sistema (los navegadores ya están descargados en esta máquina). |
 | `chart_server.py` | Daemon HTTP persistente: POST `/chart` (→ `markdown` + `csv`) y POST `/vision` (multi-modo), GET `/health`. Carga el modelo una sola vez y **se cierra solo tras 1 hora sin peticiones de inferencia** (no queda procesos en memoria). |
 | `requirements.txt` | Dependencias del proyecto (paddlepaddle 3.3.1, paddleocr[doc-parser] 3.7.0, pandas). |
 | `tests/test_extraccion.py` | Pruebas unitarias (stdlib + pandas, sin paddleocr): filtrado de separadores, conversión a DataFrame, acceso a la API y servidor HTTP con modelo simulado. |
@@ -72,6 +74,12 @@ curl -X POST http://127.0.0.1:8080/chart -H 'Content-Type: application/json' \
 # 3d. Visión por servidor
 curl -X POST http://127.0.0.1:8080/vision -H 'Content-Type: application/json' \
      -d '{"image": "foto.png", "modo": "objetos"}'
+
+# 3e. Captcha: demo sintética determinista (sin navegador, veredicto OK)
+python3 captcha_ia.py --local            # 3x3; usa --n 4 para 4x4
+
+# 3f. Captcha: modo REAL con Playwright (python del sistema)
+python3 captcha_web.py --url https://pagina.con.recaptcha --salida /var/tmp/reto
 ```
 
 ## Perfiles por máquina (visión)
@@ -88,7 +96,7 @@ RAM medida por modo (MB): texto 1000, graficos rápido 1000, graficos VLM 5200, 
 
 ```bash
 # Sintaxis (sin dependencias)
-python3 -m py_compile extractor_final.py chart_server.py
+python3 -m py_compile extractor_final.py chart_server.py ocr_rapido.py vision.py captcha_ia.py captcha_web.py
 
 # Pruebas unitarias (solo stdlib + pandas; paddleocr se simula)
 python3 -m unittest discover -s tests -v

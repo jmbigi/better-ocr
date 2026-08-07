@@ -79,7 +79,27 @@ VRAM.
 - `POST /vision` (modo texto) → 35 líneas de una tarjeta de embarque en 61 s.
 - Cierre limpio por SIGTERM; auto-cierre por inactividad verificado (lección 7).
 
-## 6. Alternativa Rust (deepseek-ocr.rs, q4k)
+## 7. Servicio de captcha (reCAPTCHA v2 con el stack local, 2026-08-07)
+
+Piezas puras verificadas por tests (sin navegador ni motores):
+
+| Pieza | Cobertura | Evidencia |
+|---|---|---|
+| Parser de instrucción | prefijos, artículos, conectores, plurales irregulares, texto pegado sin espacio ("traffic lightsIf there are none..." → "traffic light") | 10 tests |
+| Geometría de cuadrícula | celdas n×n con margen interno (excluye bordes), upscale 2× LANCZOS | 5 tests |
+| Decisor por celda | umbral 0.45 clase objetivo / 0.6 resto; celdas sin detección → "inciertas" (no se descartan) | 8 tests |
+| Demo sintética `--local` | determinista (misma semilla → mismo PNG), veredicto OK en 3×3 y 4×4 | 4 tests + CLI real |
+| Orquestador (parte pura) | n_desde_tiles (9→3, 16→4, resto None), índice→(fila,col) | 3 tests |
+
+Total: 30 tests nuevos (suite completa 98/98 OK).
+
+Pendientes (requieren ejecución en vivo o VLM libre):
+- Validar los selectores DOM de reCAPTCHA en vivo (`captcha_web.py`), SKIP y el veredicto real.
+- Pasada por celda offline sobre la 4×4 de motos guardada.
+- Fallback VLM para clases no-COCO (crosswalks, stairs...): hook reservado
+  (`fallback_vlm=`), requiere un VLM libre (regla: un VLM por máquina).
+
+## 8. Alternativa Rust (deepseek-ocr.rs, q4k)
 
 - 12/12 + 6/6 exacto, carga 8 s, inferencia ~1200 s (0.4-1.4 tok/s en CPU).
 - Build: fallo por tmpfs (Bus error) resuelto con CARGO_TARGET_DIR en disco.
