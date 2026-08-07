@@ -218,3 +218,43 @@ def celdas_grid(imagen, n: int = 3, margen_frac: float = 0.06):
                 (x0 + margen, y0 + margen,
                  x0 + tam_celda - margen, y0 + tam_celda - margen))))
     return celdas
+
+
+def clasificar_celda(detecciones: list, clase_objetivo: str,
+                     umbral_objetivo: float = 0.45,
+                     umbral_resto: float = 0.6) -> str:
+    """Clasifica una celda: 'objetivo' | 'otra' | 'incierta'.
+
+    - 'objetivo': alguna deteccion de la clase buscada con score >= umbral
+      objetivo (los objetos pequenos de los retos puntuan ~0.5-0.6).
+    - 'otra': hay detecciones de otras clases con score >= umbral resto.
+    - 'incierta': sin detecciones que alcancen ningun umbral (tolerante a
+      fallos del detector por celda: se re-evalua con VLM o se reintenta).
+    """
+    for det in detecciones:
+        if (det.get("clase") == clase_objetivo
+                and det.get("score", 0) >= umbral_objetivo):
+            return "objetivo"
+    for det in detecciones:
+        if det.get("score", 0) >= umbral_resto:
+            return "otra"
+    return "incierta"
+
+
+def decidir_celdas(detecciones_por_celda: dict, clase_objetivo: str,
+                   umbral_objetivo: float = 0.45,
+                   umbral_resto: float = 0.6) -> dict:
+    """Decide que celdas pulsar sobre el dict {(fila, col): [detecciones]}.
+
+    Devuelve {"seleccion": [...], "descartadas": [...], "inciertas": [...]}.
+    Las celdas sin deteccion no se descartan: quedan como inciertas para que
+    el llamador decida (pasada VLM, reintento o no pulsarlas).
+    """
+    resultado = {"seleccion": [], "descartadas": [], "inciertas": []}
+    for (fila, col), detecciones in detecciones_por_celda.items():
+        estado = clasificar_celda(detecciones, clase_objetivo,
+                                  umbral_objetivo, umbral_resto)
+        resultado[{"objetivo": "seleccion",
+                   "otra": "descartadas",
+                   "incierta": "inciertas"}[estado]].append((fila, col))
+    return resultado

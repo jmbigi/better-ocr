@@ -11,6 +11,8 @@ from PIL import Image
 from captcha_ia import (
     aumentar_escala,
     celdas_grid,
+    clasificar_celda,
+    decidir_celdas,
     parsear_instruccion,
     recortar_sufijos,
     singularizar,
@@ -128,6 +130,54 @@ class TestGeometriaGrid(unittest.TestCase):
         grande = aumentar_escala(im, factor=2)
         self.assertEqual(grande.size, (120, 120))
         self.assertEqual(grande.getpixel((60, 60)), (10, 20, 30))
+
+
+class TestClasificarCelda(unittest.TestCase):
+    def test_objetivo_umbral_bajo_0_45(self):
+        # los objetos pequenos puntuan ~0.5-0.6: 0.52 basta
+        self.assertEqual(clasificar_celda(
+            [{"clase": "bus", "score": 0.52}], "bus"), "objetivo")
+
+    def test_objetivo_score_alto(self):
+        self.assertEqual(clasificar_celda(
+            [{"clase": "bus", "score": 0.9}], "bus"), "objetivo")
+
+    def test_otra_clase_por_encima_del_umbral_resto(self):
+        self.assertEqual(clasificar_celda(
+            [{"clase": "car", "score": 0.7}], "bus"), "otra")
+
+    def test_otra_clase_bajo_umbral_resto_es_incierta(self):
+        # deteccion debil de otra clase: no prueba que sea negativa
+        self.assertEqual(clasificar_celda(
+            [{"clase": "car", "score": 0.4}], "bus"), "incierta")
+
+    def test_objetivo_bajo_umbral_y_otra_alta(self):
+        # bus a 0.40 (< 0.45) y coche a 0.7: la evidencia fuerte es otra clase
+        self.assertEqual(clasificar_celda(
+            [{"clase": "bus", "score": 0.40},
+             {"clase": "car", "score": 0.7}], "bus"), "otra")
+
+    def test_sin_detecciones_es_incierta(self):
+        self.assertEqual(clasificar_celda([], "bus"), "incierta")
+
+
+class TestDecidirCeldas(unittest.TestCase):
+    def test_seleccion_descartadas_e_inciertas(self):
+        det = {
+            (0, 0): [{"clase": "bus", "score": 0.9}],       # seleccion
+            (0, 1): [{"clase": "car", "score": 0.75}],      # descartada
+            (0, 2): [],                                     # incierta
+            (1, 0): [{"clase": "bus", "score": 0.5}],       # seleccion
+            (1, 1): [{"clase": "bus", "score": 0.3}],       # incierta
+        }
+        res = decidir_celdas(det, "bus")
+        self.assertEqual(sorted(res["seleccion"]), [(0, 0), (1, 0)])
+        self.assertEqual(res["descartadas"], [(0, 1)])
+        self.assertEqual(sorted(res["inciertas"]), [(0, 2), (1, 1)])
+
+    def test_vacio(self):
+        res = decidir_celdas({}, "bus")
+        self.assertEqual(res, {"seleccion": [], "descartadas": [], "inciertas": []})
 
 
 if __name__ == "__main__":
