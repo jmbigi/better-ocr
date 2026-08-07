@@ -92,20 +92,24 @@ Piezas puras verificadas por tests (sin navegador ni motores):
 | Orquestador (parte pura) | n_desde_tiles (9→3, 16→4, resto None), índice→(fila,col) | 3 tests |
 | Orquestador E2E local | flujo completo de Playwright contra una página falsa que replica el DOM de reCAPTCHA (ancla en iframe recaptcha, reto en bframe, tiles que registran clics, VERIFY que marca el ancla): instrucción→selección→clics JS→veredicto "ok" | 2 tests de integración (4.6 s) |
 | Reintento tras error/re-render (E2E) | VERIFY fallido en el 1er intento (error + replaceimage + instrucción cambia a "select all cars") → el orquestador reintenta y el 2º VERIFY limpia el error y triunfa; clics [1,6] en 2 intentos | 1 test (10.4 s los 3) |
+| Camino SKIP (E2E) | instrucción sin clase ("Select all images" → None): se pulsa SKIP (clic real primero, JS como fallback) sin tiles, y el resultado distingue camino "skip"/"tiles" con ok=True | 1 test |
 | Fallback OCR de instrucción | sin `div.rc-imageselect-desc`, la instrucción se obtiene por OCR (worker PP-OCRv6 inyectable) y el flujo sigue completo | cubierto por el 2º E2E |
 | Pasada offline con RT-DETR real | `captcha_web.py --offline` sobre la demo sintética con el worker real (CPU forzada, lección 18): 2/2 pasadas idénticas — 5 celdas detectadas, 0 buses (correcto: las figuras sintéticas no son buses) | 2 ejecuciones reales |
 
-Total: 34 tests nuevos (suite completa 107/107 OK).
+Total: 35 tests nuevos (suite completa 108/108 OK).
 
 Pendientes (requieren ejecución en vivo o VLM libre):
-- Validación real del programador en curso contra la demo oficial de Google
-  (`--url https://www.google.com/recaptcha/api2/demo`): 2 retos 3×3 capturados;
-  hallazgos aplicados — clic real en VERIFY (el JS a veces se ignora: wrong →
-  api2/replaceimage), sufijo real del DOM "click verify once there are none
-  left", desc renderizado un instante después de la cuadrícula. Aún sin
-  veredicto "ok" en vivo.
-- Pasada por celda offline sobre una cuadrícula real guardada
-  (`captcha_web.py --offline IMAGEN --n 3 --instruccion "..."`).
+- Validación real contra la demo oficial de Google
+  (`--url https://www.google.com/recaptcha/api2/demo`): loop completo
+  verificado en vivo (checkbox → reto → instrucción DOM/OCR → tiles →
+  VERIFY → feedback `replaceimage` → reintento; ver lección 19). Aún sin
+  veredicto "ok": la precisión real de RT-DETR sobre tiles pequeños queda
+  por debajo del adversario (4×4 motos: celdas reales a 0.24-0.28 bajo el
+  umbral; 3×3 bicicletas detectadas y aun así rechazado).
+- Pasada por celda offline sobre cuadrículas reales guardadas: 4×4 motos —
+  (1,1) 0.85 y (2,2) 0.59 seleccionadas, moto real en (1,2) a 0.24-0.28
+  perdida (selección incompleta → rechazo); 3×3 crosswalks — sin detecciones
+  (clase no-COCO), VERIFY vacío ignorado por Google (imagen intacta).
 - Fallback VLM para clases no-COCO (crosswalks, stairs...): hook reservado
   (`fallback_vlm=`), requiere un VLM libre (regla: un VLM por máquina).
 
