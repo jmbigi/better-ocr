@@ -86,20 +86,27 @@ def env_worker() -> dict:
 # quien tiene paddle/paddlex). modo_objetos_lote carga RT-DETR UNA vez para
 # todo el lote: create_model no cachea y cargar por imagen multiplica el
 # tiempo por N (hallazgo 2026-08-07, timeout del worker).
+# CUDA_VISIBLE_DEVICES="" fuerza CPU: con GPU visible, paddle (build GPU)
+# toca el cudnn 9.1 del pyenv y aborta con SIGABRT de forma NO determinista
+# (leccion 18 ampliada: no solo ChartParsing, tambien RT-DETR; hallazgo
+# 2026-08-07). RT-DETR en CPU: ~18 s medidos, determinista.
 WORKER_DETECCION = r"""
 import json, os, sys
 sys.path.insert(0, %(raiz)r)
 os.environ.setdefault("TMPDIR", "/var/tmp")
+os.environ["CUDA_VISIBLE_DEVICES"] = ""
 from vision import modo_objetos_lote
 paths = json.load(sys.stdin)
 json.dump(modo_objetos_lote(paths), sys.stdout)
 """
 
 # Worker OCR (fallback de instruccion): PP-OCRv6 en modo texto (vision).
+# CUDA_VISIBLE_DEVICES="" igual que el worker de deteccion (leccion 18).
 WORKER_OCR = r"""
 import json, os, sys
 sys.path.insert(0, %(raiz)r)
 os.environ.setdefault("TMPDIR", "/var/tmp")
+os.environ["CUDA_VISIBLE_DEVICES"] = ""
 from vision import modo_texto
 paths = json.load(sys.stdin)
 out = {}
@@ -315,17 +322,28 @@ def resolver_web(url: str, headed: bool = False, salida: str = "",
 
         # 1) checkbox ancla dentro del iframe de reCAPTCHA
         # (excluir el frame principal: la propia URL de la pagina puede
-        # contener "recaptcha", p. ej. la demo de Google)
+        # contener "recaptcha", p. ej. la demo de Google; con red inestable
+        # el iframe puede tardar mas de un par de segundos en montarse)
+        t0 = time.monotonic()
         marco_recaptcha = None
-        for f in pagina.frames:
-            if "recaptcha" in (f.url or "") and "/anchor" in f.url:
-                marco_recaptcha = f
-                break
-        if marco_recaptcha is None:
+        while time.monotonic() - t0 < TIEMPO_ESPERA_RETO:
             for f in pagina.frames:
-                if "recaptcha" in (f.url or "") and f != pagina.main_frame:
+                if "recaptcha" in (f.url or "") and "/anchor" in f.url:
                     marco_recaptcha = f
                     break
+            if marco_recaptcha is None:
+                for f in pagina.frames:
+                    if ("recaptcha" in (f.url or "")
+                            and f != pagina.main_frame):
+                        marco_recaptcha = f
+                        break
+            if marco_recaptcha is not None:
+                break
+            try:
+                pagina.reload(wait_until="domcontentloaded", timeout=30000)
+            except Exception:
+                pass
+            time.sleep(1.0)
         if marco_recaptcha is None:
             navegador.close()
             return {"ok": False, "error": "no se encontro el iframe de reCAPTCHA"}
@@ -419,11 +437,38 @@ def resolver_web(url: str, headed: bool = False, salida: str = "",
                 "tiempo_s": round(time.monotonic() - t_inicio, 1)}
 
 
+def resolver_offline(imagen_ruta: str, n: int, instruccion: str) -> dict:
+    """Pipeline completo SIN navegador sobre una cuadricula guardada (pasada
+    por celda offline): celdas + RT-DETR batch (una carga) + decision."""
+    from PIL import Image
+
+    from captcha_ia import aumentar_escala, celdas_grid, resolver
+
+    imagen = Image.open(imagen_ruta)
+    celdas_pil = [(f, c, aumentar_escala(celda))
+                  for f, c, celda in celdas_grid(imagen, n=n)]
+    detecciones = detectar_batch_worker(celdas_pil)
+
+    def detectar_celda(_celda, fila, col):
+        return detecciones.get((fila, col), [])
+
+    res = resolver(imagen, instruccion, detectar_celda, n=n,
+                   umbral_objetivo=UMBRAL_OBJETIVO, umbral_resto=UMBRAL_RESTO)
+    res["celdas_detectadas"] = sum(1 for v in detecciones.values() if v)
+    return res
+
+
 def main() -> None:
     import argparse
 
     parser = argparse.ArgumentParser(description="reCAPTCHA v2 real (Playwright)")
-    parser.add_argument("--url", required=True, help="pagina con reCAPTCHA v2")
+    parser.add_argument("--url", help="pagina con reCAPTCHA v2")
+    parser.add_argument("--offline", metavar="IMAGEN",
+                        help="pasada por celda offline sobre una cuadricula guardada")
+    parser.add_argument("--n", type=int, choices=(3, 4),
+                        help="tamano de la cuadricula (con --offline)")
+    parser.add_argument("--instruccion", default="",
+                        help="instruccion del reto (con --offline)")
     parser.add_argument("--headed", action="store_true",
                         help="navegador visible (default: headless)")
     parser.add_argument("--salida", default="",
@@ -433,6 +478,15 @@ def main() -> None:
     parser.add_argument("--max-intentos", type=int, default=3,
                         help="reintentos tras re-render del reto")
     args = parser.parse_args()
+
+    if args.offline:
+        if not args.n or not args.instruccion:
+            parser.error("--offline requiere --n y --instruccion")
+        resultado = resolver_offline(args.offline, args.n, args.instruccion)
+        print(json.dumps(resultado, ensure_ascii=False, indent=2))
+        return
+    if not args.url:
+        parser.error("se requiere --url (modo real) o --offline IMAGEN")
 
     resultado = resolver_web(args.url, headed=args.headed,
                              salida=args.salida, timeout_s=args.timeout,
