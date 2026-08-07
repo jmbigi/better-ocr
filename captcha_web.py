@@ -35,6 +35,7 @@ SELEC_INSTRUCCION = (
 SELEC_TILES = "table.rc-imageselect-table td.rc-imageselect-tile"
 SELEC_PAYLOAD = ".rc-imageselect-payload"
 SELEC_VERIFY = "button.rc-button-go, .rc-button-go"
+SELEC_SKIP = "button:has-text('Skip')"
 SELEC_ERROR = ".rc-imageselect-error-response"
 SELEC_CHECKBOX = "#recaptcha-anchor"
 
@@ -158,6 +159,17 @@ def pulsar_verificar(bframe) -> None:
         pass
 
 
+def pulsar_skip(bframe) -> bool:
+    """Pulsa SKIP si existe (instrucciones del tipo 'si no hay ninguna')."""
+    try:
+        if bframe.locator(SELEC_SKIP).count() > 0:
+            bframe.locator(SELEC_SKIP).first.evaluate("el => el.click()")
+            return True
+    except Exception:
+        pass
+    return False
+
+
 def veredicto(pagina, bframe) -> str:
     """Tras VERIFY: 'ok' | 'error' | 'pendiente' (espera acotada)."""
     t0 = time.monotonic()
@@ -180,10 +192,15 @@ def veredicto(pagina, bframe) -> str:
 
 
 def resolver_web(url: str, headed: bool = False, salida: str = "",
-                 timeout_s: float = 150.0) -> dict:
+                 timeout_s: float = 150.0, max_intentos: int = 3,
+                 fallback_vlm=None) -> dict:
     """Ciclo completo real: checkbox -> reto -> instruccion -> tiles ->
-    VERIFY -> veredicto. Import perezoso de Playwright (solo python del
-    sistema); la deteccion va al venv por subproceso."""
+    VERIFY/SKIP -> veredicto, con reintento tras re-render del reto.
+
+    Import perezoso de Playwright (solo python del sistema); la deteccion va
+    al venv por subproceso. `fallback_vlm(celdas_inciertas)` es un hook
+    reservado (requiere un VLM libre: docbee/ollama); si no se pasa, las
+    celdas inciertas simplemente no se pulsan."""
     from playwright.sync_api import sync_playwright
 
     from captcha_ia import resolver
@@ -222,47 +239,72 @@ def resolver_web(url: str, headed: bool = False, salida: str = "",
             navegador.close()
             return {"ok": False, "error": "el reto no aparecio en bframe"}
 
-        # 3) instruccion + cuadricula + captura
-        instruccion = leer_instruccion(bframe)
-        n = tamano_cuadricula(bframe)
-        if n is None:
-            navegador.close()
-            return {"ok": False, "error": "cuadricula no reconocida (tiles raros)"}
-        imagen = capturar_cuadricula(bframe)
+        from captcha_ia import aumentar_escala, celdas_grid
 
-        # 4) resolucion: celdas + RT-DETR batch + decision
-        from captcha_ia import celdas_grid, aumentar_escala
+        for intento in range(1, max_intentos + 1):
+            if time.monotonic() - t_inicio > timeout_s:
+                navegador.close()
+                return {"ok": False, "error": "tiempo maximo agotado",
+                        "intento": intento}
 
-        celdas_pil = [(f, c, aumentar_escala(celda))
-                      for f, c, celda in celdas_grid(imagen, n=n)]
-        detecciones = detectar_batch_worker(celdas_pil)
+            # 3) instruccion + cuadricula + captura (puede re-renderizarse)
+            instruccion = leer_instruccion(bframe)
+            n = tamano_cuadricula(bframe)
+            if n is None:
+                continue  # re-render en curso: reintentar
+            imagen = capturar_cuadricula(bframe)
 
-        def detectar_celda(_celda, fila, col):
-            return detecciones.get((fila, col), [])
+            # 4) resolucion: celdas + RT-DETR batch + decision
+            celdas_pil = [(f, c, aumentar_escala(celda))
+                          for f, c, celda in celdas_grid(imagen, n=n)]
+            detecciones = detectar_batch_worker(celdas_pil)
+            if not any(detecciones.values()):
+                # el worker fallo (o el reto se re-renderizo a mitad):
+                # no pulsar a ciegas
+                if fallback_vlm is not None and bframe.locator(SELEC_TILES).count() >= 4:
+                    detecciones = fallback_vlm(celdas_pil)
+                if not any(detecciones.values()):
+                    continue  # reintentar con la nueva captura
 
-        res = resolver(imagen, instruccion, detectar_celda, n=n,
-                       umbral_objetivo=UMBRAL_OBJETIVO,
-                       umbral_resto=UMBRAL_RESTO)
-        if not res["ok"]:
-            navegador.close()
-            return {**res, "instruccion": instruccion}
+            def detectar_celda(_celda, fila, col):
+                return detecciones.get((fila, col), [])
 
-        # 5) clics + verificar + veredicto
-        pulsar_tiles(bframe, res["seleccion"], n)
-        pulsar_verificar(bframe)
-        resultado = veredicto(pagina, bframe)
+            res = resolver(imagen, instruccion, detectar_celda, n=n,
+                           umbral_objetivo=UMBRAL_OBJETIVO,
+                           umbral_resto=UMBRAL_RESTO)
+            if not res["ok"]:
+                # instruccion no parseable: opcion conservadora = SKIP
+                pulsar_skip(bframe)
+            else:
+                pulsar_tiles(bframe, res["seleccion"], n)
+                pulsar_verificar(bframe)
 
-        if salida:
-            os.makedirs(salida, exist_ok=True)
-            imagen.save(os.path.join(salida, f"reto_{n}x{n}.png"))
-            with open(os.path.join(salida, "resultado.json"), "w",
-                      encoding="utf-8") as f:
-                json.dump({**res, "veredicto": resultado,
-                           "instruccion": instruccion}, f,
-                          ensure_ascii=False, indent=2)
+            # 5) veredicto
+            resultado = veredicto(pagina, bframe)
+            if salida:
+                os.makedirs(salida, exist_ok=True)
+                try:
+                    imagen.save(os.path.join(salida, f"reto_{n}x{n}_i{intento}.png"))
+                except Exception:
+                    pass
+            if resultado == "ok":
+                if salida:
+                    with open(os.path.join(salida, "resultado.json"), "w",
+                              encoding="utf-8") as f:
+                        json.dump({**res, "veredicto": resultado,
+                                   "instruccion": instruccion,
+                                   "intento": intento}, f,
+                                  ensure_ascii=False, indent=2)
+                navegador.close()
+                return {**res, "veredicto": resultado,
+                        "instruccion": instruccion, "intento": intento,
+                        "tiempo_s": round(time.monotonic() - t_inicio, 1)}
+            # error o pendiente: el reto se re-renderiza; reintentar
 
         navegador.close()
-        return {**res, "veredicto": resultado, "instruccion": instruccion,
+        return {"ok": False, "error": "sin exito tras varios intentos",
+                "veredicto": resultado, "instruccion": instruccion,
+                "intento": max_intentos,
                 "tiempo_s": round(time.monotonic() - t_inicio, 1)}
 
 
@@ -277,10 +319,13 @@ def main() -> None:
                         help="directorio para guardar captura y resultado")
     parser.add_argument("--timeout", type=float, default=150.0,
                         help="tiempo maximo total en segundos")
+    parser.add_argument("--max-intentos", type=int, default=3,
+                        help="reintentos tras re-render del reto")
     args = parser.parse_args()
 
     resultado = resolver_web(args.url, headed=args.headed,
-                             salida=args.salida, timeout_s=args.timeout)
+                             salida=args.salida, timeout_s=args.timeout,
+                             max_intentos=args.max_intentos)
     print(json.dumps(resultado, ensure_ascii=False, indent=2))
 
 
