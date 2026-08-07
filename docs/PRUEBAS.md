@@ -112,8 +112,9 @@ Piezas puras verificadas por tests (sin navegador ni motores):
 Total: 65 tests nuevos (suite completa 133/133 OK).
 | **VLM fallback EN VIVO (reCAPTCHA)** | demo oficial, 2026-08-07: `--vlm-fallback` → **ok al intento 1 en 31.7 s** (clase car, 4 celdas): la confirmación de dos etapas corrió sobre los candidatos del worker (4 celdas, ~1.7 s/celda con gemma3:4b en caché; +7 s vs sin VLM) y los confirmó todos; el reto pasó. El caso "mountains or hills" (no-COCO con detección vacía) queda pendiente de medir: el VLM lo cubriría con "Does this image contain mountains or hills?" por tile | `intentos.json` en `/var/tmp/captcha_real/vlm/`; ollama detenido tras la prueba (estado restaurado) |
 | **Pasada de recall VLM EN VIVO** | el 4×4 de traffic lights que falló con RT-DETR solo (r5, 3 celdas) se **resolvió con `--vlm-fallback`** (v2, 47.7 s): la pasada de recall encontró traffic lights en 2 celdas que RT-DETR perdió (score 1.0 del VLM, 13/16 celdas vacías en el 4×4) — 2/3 celdas seleccionadas vinieron del VLM. Fix adicional: sin candidatos del objetivo, el VLM cubre TODAS las celdas y fusiona (caso "mountains or hills" con bicycles/cars detectados, v3) | `intentos.json` v2/v3; agregado n=11 en vivo: 7/11 ok (63.6%) |
+| **Límite medido: recall pass sobre-agrega en clases comunes** | n=16 en vivo, 8 ok (50%): 2/2 runs de cars con una 5ª celda añadida SOLO por el VLM (score 1.0 en celda vacía, v4 y v8) fueron rechazados; los 3 runs de cars con 4 celdas RT-DETR pasaron. El recall pass ayuda en clases difíciles (traffic lights 4×4) pero añade falsos positivos en comunes → **configurable con `--sin-vlm-recall`**. Dict de fallo ahora incluye `seleccion` (el análisis por `intentos.json` mostraba selecciones reales que el resumen final no) | intentos.json v4/v8/v9/v6 |
 
-Total: 66 tests nuevos (suite completa 134/134 OK).
+Total: 67 tests nuevos (suite completa 135/135 OK).
 
 Pendientes (requieren ejecución en vivo o VLM libre):
 - Validación real contra la demo oficial de Google
