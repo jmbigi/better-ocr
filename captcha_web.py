@@ -32,9 +32,17 @@ SELEC_INSTRUCCION = (
     "#rc-imageselect .rc-imageselect-desc, "
     "#rc-imageselect .rc-imageselect-desc-noaccess"
 )
-SELEC_TILES = "table.rc-imageselect-table td.rc-imageselect-tile"
+# El prefijo de la tabla varia con el tamano del reto (rc-imageselect-table-33,
+# rc-imageselect-table-44): los tiles se seleccionan por su propia clase.
+SELEC_TILES = "td.rc-imageselect-tile"
+# La tabla completa (sin la banda de instruccion, que va dentro del payload
+# por encima de la cuadricula). La clase varia con el tamano del reto
+# (rc-imageselect-table, -33, -44): selector por prefijo.
+SELEC_TABLA = 'table[class*="rc-imageselect-table"]'
 SELEC_PAYLOAD = ".rc-imageselect-payload"
-SELEC_VERIFY = "button.rc-button-go, .rc-button-go"
+# El boton de VERIFY en las versiones actuales es rc-button-default
+# (historico: rc-button-go).
+SELEC_VERIFY = "button.rc-button-default, .rc-button-default"
 SELEC_SKIP = "button:has-text('Skip')"
 SELEC_ERROR = ".rc-imageselect-error-response"
 SELEC_CHECKBOX = "#recaptcha-anchor"
@@ -46,6 +54,33 @@ TIEMPO_ESPERA_VEREDICTO = 15.0
 
 VENV_PYTHON = os.path.join(os.path.dirname(os.path.abspath(__file__)),
                            ".venv", "bin", "python")
+
+
+def env_worker() -> dict:
+    """Entorno para los subprocesos del venv (paddle en GPU).
+
+    El host tiene librerias nvidia (CUDNN 9.1) en LD_LIBRARY_PATH que rompen
+    paddle (compilado con 9.5): "undefined symbol: cudnnGetLibConfig" + SIGABRT
+    (leccion 17). Fix verificado en scripts/bateria_360.py: anteponer las
+    nvidia-* del site-packages del VENV y quitar rutas .pyenv.
+    """
+    import glob
+    import site as _site
+
+    raiz = os.path.dirname(os.path.abspath(__file__))
+    venv_site = sorted(glob.glob(os.path.join(raiz, ".venv", "lib",
+                                              "python*", "site-packages")))
+    nvidia_dirs = []
+    for sp in venv_site:
+        nvidia_dirs += sorted(glob.glob(os.path.join(sp, "nvidia", "*", "lib")))
+    ld = ":".join(p for p in os.environ.get("LD_LIBRARY_PATH", "").split(":")
+                  if p and ".pyenv" not in p)
+    return {
+        **os.environ,
+        "TMPDIR": "/var/tmp",
+        "PADDLE_PDX_ENABLE_MKLDNN_BYDEFAULT": "0",
+        "LD_LIBRARY_PATH": ":".join(nvidia_dirs + [ld]),
+    }
 
 # Script del worker de deteccion (se ejecuta con el python del venv, que es
 # quien tiene paddle/paddlex; una sola carga de RT-DETR para todo el lote).
@@ -59,6 +94,20 @@ out = {}
 for p in paths:
     res = modo_objetos(p, False)
     out[p] = res.get("detecciones", []) if res.get("ok") else []
+json.dump(out, sys.stdout)
+"""
+
+# Worker OCR (fallback de instruccion): PP-OCRv6 en modo texto (vision).
+WORKER_OCR = r"""
+import json, os, sys
+sys.path.insert(0, %(raiz)r)
+os.environ.setdefault("TMPDIR", "/var/tmp")
+from vision import modo_texto
+paths = json.load(sys.stdin)
+out = {}
+for p in paths:
+    res = modo_texto(p)
+    out[p] = " ".join(linea["texto"] for linea in res.get("lineas", [])) if res.get("ok") else ""
 json.dump(out, sys.stdout)
 """
 
@@ -95,7 +144,7 @@ def detectar_batch_worker(celdas_pil: list) -> dict:
         proc = subprocess.run(
             [VENV_PYTHON, "-c", script],
             input=json.dumps(list(rutas.values())),
-            capture_output=True, text=True, timeout=180,
+            capture_output=True, text=True, timeout=180, env=env_worker(),
         )
         if proc.returncode != 0:
             return {clave: [] for clave in rutas}
@@ -116,12 +165,52 @@ def detectar_batch_worker(celdas_pil: list) -> dict:
 
 
 def leer_instruccion(bframe) -> str:
-    """Texto de la instruccion del reto (desc del DOM)."""
-    locator = bframe.locator(SELEC_INSTRUCCION).first
+    """Texto de la instruccion del reto (desc del DOM). count() evita el
+    auto-wait de 30 s de Playwright cuando el elemento no existe."""
+    locator = bframe.locator(SELEC_INSTRUCCION)
+    if locator.count() == 0:
+        return ""
     try:
-        return locator.inner_text().strip()
+        return locator.first.inner_text().strip()
     except Exception:
         return ""
+
+
+def worker_ocr_texto(rutas: list) -> dict:
+    """OCR PP-OCRv6 por subproceso del venv: ruta -> texto ('' si falla)."""
+    if not rutas:
+        return {}
+    script = WORKER_OCR % {"raiz": os.path.dirname(os.path.abspath(__file__))}
+    try:
+        proc = subprocess.run(
+            [VENV_PYTHON, "-c", script],
+            input=json.dumps(rutas),
+            capture_output=True, text=True, timeout=120, env=env_worker(),
+        )
+        if proc.returncode != 0:
+            return {r: "" for r in rutas}
+        return json.loads(proc.stdout)
+    except (json.JSONDecodeError, subprocess.TimeoutExpired):
+        return {r: "" for r in rutas}
+
+
+def leer_instruccion_ocr(bframe, worker=worker_ocr_texto) -> str:
+    """Fallback OCR de la instruccion: captura la banda superior del payload
+    (el texto va encima de la cuadricula) y la lee con PP-OCRv6."""
+    from PIL import Image
+
+    with tempfile.TemporaryDirectory(prefix="captcha_inst_") as directorio:
+        try:
+            ruta_payload = os.path.join(directorio, "payload.png")
+            bframe.locator(SELEC_PAYLOAD).screenshot(path=ruta_payload)
+            im = Image.open(ruta_payload)
+            ancho, alto = im.size
+            ruta_franja = os.path.join(directorio, "franja.png")
+            im.crop((0, 0, ancho, alto // 4)).save(ruta_franja)
+            texto = worker([ruta_franja]).get(ruta_franja, "")
+            return " ".join(texto.split())
+        except Exception:
+            return ""
 
 
 def tamano_cuadricula(bframe):
@@ -134,16 +223,14 @@ def tamano_cuadricula(bframe):
 
 
 def capturar_cuadricula(bframe):
-    """Captura la cuadricula del reto y la devuelve como PIL Image."""
+    """Captura SOLO la cuadricula (la tabla de tiles; la instruccion va en
+    una banda aparte y no debe entrar en las celdas)."""
     from PIL import Image
 
-    payload = bframe.locator(SELEC_PAYLOAD)
-    ruta = os.path.join(tempfile.mkdtemp(prefix="captcha_reto_"),
-                        "cuadricula.png")
-    payload.screenshot(path=ruta)
-    return Image.open(ruta)
-
-
+    with tempfile.TemporaryDirectory(prefix="captcha_reto_") as directorio:
+        ruta = os.path.join(directorio, "cuadricula.png")
+        bframe.locator(SELEC_TABLA).screenshot(path=ruta)
+        return Image.open(ruta)
 def pulsar_tiles(bframe, seleccion: list, n: int) -> None:
     """Clic JS en cada tile seleccionado (el.click() evita el fallo
     'outside of viewport' de los transforms anti-automatizacion)."""
@@ -153,8 +240,10 @@ def pulsar_tiles(bframe, seleccion: list, n: int) -> None:
 
 
 def pulsar_verificar(bframe) -> None:
+    """Pulsa VERIFY si existe (count() evita el auto-wait de 30 s)."""
     try:
-        bframe.locator(SELEC_VERIFY).first.evaluate("el => el.click()")
+        if bframe.locator(SELEC_VERIFY).count() > 0:
+            bframe.locator(SELEC_VERIFY).first.evaluate("el => el.click()")
     except Exception:
         pass
 
@@ -181,7 +270,7 @@ def veredicto(pagina, bframe) -> str:
             return "ok"
         # el ancla vive en el iframe de reCAPTCHA (no en frames[0])
         for f in pagina.frames:
-            if "recaptcha" in (f.url or ""):
+            if "recaptcha" in (f.url or "") and f != pagina.main_frame:
                 try:
                     clase = f.locator(SELEC_CHECKBOX).get_attribute("class") or ""
                     if "recaptcha-checkbox-checked" in clase:
@@ -195,7 +284,8 @@ def veredicto(pagina, bframe) -> str:
 
 def resolver_web(url: str, headed: bool = False, salida: str = "",
                  timeout_s: float = 150.0, max_intentos: int = 3,
-                 fallback_vlm=None, detectar_lote=None) -> dict:
+                 fallback_vlm=None, detectar_lote=None,
+                 ocr_fallback=None) -> dict:
     """Ciclo completo real: checkbox -> reto -> instruccion -> tiles ->
     VERIFY/SKIP -> veredicto, con reintento tras re-render del reto.
 
@@ -203,28 +293,41 @@ def resolver_web(url: str, headed: bool = False, salida: str = "",
     al venv por subproceso. `fallback_vlm(celdas_inciertas)` es un hook
     reservado (requiere un VLM libre: docbee/ollama); si no se pasa, las
     celdas inciertas simplemente no se pulsan. `detectar_lote(celdas_pil)`
-    permite inyectar un detector (tests) en lugar del worker RT-DETR."""
+    y `ocr_fallback(bframe)` permiten inyectar detector/OCR (tests)."""
     from playwright.sync_api import sync_playwright
 
     from captcha_ia import resolver
 
     if detectar_lote is None:
         detectar_lote = detectar_batch_worker
+    if ocr_fallback is None:
+        ocr_fallback = leer_instruccion_ocr
 
     t_inicio = time.monotonic()
     with sync_playwright() as pw:
         navegador = pw.chromium.launch(headless=not headed)
-        contexto = navegador.new_context(viewport={"width": 1280, "height": 900})
+        # locale fijo en-US: el parser de instrucciones de captcha_ia es
+        # ingles (las instrucciones de reCAPTCHA siguen el idioma del
+        # navegador: hl=en con locale en-US, verificado en la demo).
+        contexto = navegador.new_context(locale="en-US",
+                                         viewport={"width": 1280, "height": 900})
         pagina = contexto.new_page()
         pagina.goto(url, timeout=30000)
         pagina.wait_for_timeout(1500)
 
         # 1) checkbox ancla dentro del iframe de reCAPTCHA
+        # (excluir el frame principal: la propia URL de la pagina puede
+        # contener "recaptcha", p. ej. la demo de Google)
         marco_recaptcha = None
         for f in pagina.frames:
-            if "recaptcha" in (f.url or ""):
+            if "recaptcha" in (f.url or "") and "/anchor" in f.url:
                 marco_recaptcha = f
                 break
+        if marco_recaptcha is None:
+            for f in pagina.frames:
+                if "recaptcha" in (f.url or "") and f != pagina.main_frame:
+                    marco_recaptcha = f
+                    break
         if marco_recaptcha is None:
             navegador.close()
             return {"ok": False, "error": "no se encontro el iframe de reCAPTCHA"}
@@ -247,6 +350,7 @@ def resolver_web(url: str, headed: bool = False, salida: str = "",
 
         from captcha_ia import aumentar_escala, celdas_grid
 
+        resultado = None
         for intento in range(1, max_intentos + 1):
             if time.monotonic() - t_inicio > timeout_s:
                 navegador.close()
@@ -255,6 +359,8 @@ def resolver_web(url: str, headed: bool = False, salida: str = "",
 
             # 3) instruccion + cuadricula + captura (puede re-renderizarse)
             instruccion = leer_instruccion(bframe)
+            if not instruccion:
+                instruccion = ocr_fallback(bframe)
             n = tamano_cuadricula(bframe)
             if n is None:
                 continue  # re-render en curso: reintentar
@@ -309,7 +415,8 @@ def resolver_web(url: str, headed: bool = False, salida: str = "",
 
         navegador.close()
         return {"ok": False, "error": "sin exito tras varios intentos",
-                "veredicto": resultado, "instruccion": instruccion,
+                "veredicto": resultado or "pendiente",
+                "instruccion": instruccion,
                 "intento": max_intentos,
                 "tiempo_s": round(time.monotonic() - t_inicio, 1)}
 
