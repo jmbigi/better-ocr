@@ -275,3 +275,15 @@
 **Lección general:** el loop mecánico (checkbox → reto → instrucción DOM/OCR → cuadrícula → RT-DETR por celda → clics → VERIFY → feedback por replaceimage → reintento) está completo y verificado en vivo; el rendimiento real lo limita la precisión del detector sobre tiles pequeños/adversarios y las clases no-COCO (requieren el hook `fallback_vlm`, aún sin cablear). Cualquier reporte de éxito en vivo debe adjuntar las capturas guardadas y las detecciones por celda (P0.1).
 
 **Ampliación (2026-08-07):** el VLM binario por tile quedó **validado en tiles reales** con el patrón DDG del programador (anomaly modal de DuckDuckGo): RT-DETR encontró 4 "birds", gemma3:4b respondió YES/NO por tile y descartó el falso positivo (3 ducks) — el reto pasó ("Thanks for confirming you're human!"). Ese hallazgo se incorporó a `captcha_web.py` como **confirmación de dos etapas** (`_aplicar_fallback_vlm`): los candidatos del worker se confirman/descartan con el VLM binario; sin detecciones (no-COCO) el VLM cubre todas las celdas. En cambio, la demo sintética NO sirve para medir el VLM: gemma3:4b dice "No" a todas las figuras abstractas (PRUEBAS §7).
+
+## 21. Primer veredicto "ok" EN VIVO del servicio captcha (2026-08-07)
+
+**Contexto:** ejecución real contra la demo oficial de Google (`https://www.google.com/recaptcha/api2/demo`) con `captcha_web.py --url ... --salida /var/tmp/captcha_real`. Primer éxito de punta a punta: **ok al intento 1 en 24.9 s** — instrucción "Select all images with cars" leída del DOM (con salto de línea, normalizada por el parser), 4 celdas seleccionadas por RT-DETR (scores 0.89/0.87/0.67/0.90), VERIFY con clic real, checkbox ancla marcado, `resultado.json` + `intentos.json` + captura guardados.
+
+**Qué lo hizo posible (fixes acumulados que se validan juntos en vivo):**
+1. **Selector real del desc**: el DOM actual usa `rc-imageselect-desc-no-canonical` (no `rc-imageselect-desc`) — sin ese fix, la instrucción nunca se leía y el flujo caía a SKIP (la causa principal del "sin éxito" histórico).
+2. **Parser multi-idioma**: devuelve None en vez de basura (una clase imposible dejaba la selección vacía y VERIFY se ignoraba en silencio — hallazgo 2 de la lección 20).
+3. **Clic real en VERIFY** (el JS a veces se ignora; wrong → api2/replaceimage).
+4. **Umbral adaptativo** (0.45 en 3×3): los cars del reto puntuaban 0.67-0.90, holgadamente sobre el umbral.
+
+**Lección:** los fallos en vivo encadenados ("sin éxito" tras "sin éxito") no se resolvieron tocando la precisión del detector — se resolvieron con **evidencia del DOM real** (archivos guardados por el programador) que destapó bugs de selectores y parser. El orden de ataque correcto en automatización de widgets de terceros: 1) capturar y validar el DOM real, 2) arreglar selectores/parser, 3) recién entonces medir precisión del detector. Y los `--salida`/`intentos.json` fueron la infraestructura que lo hizo analizable (P0.1).
