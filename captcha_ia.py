@@ -29,13 +29,23 @@ RE_CONDICION = re.compile(r"^(?:if|when)\s+(?:there\s+(?:are|is)\s+)?(.+?)\s*,\s
 # Sufijos de instrucción colgante, con y sin espacio (el OCR pega el texto:
 # "traffic lightsIf there are none..." -> recortar en "If").
 SUFIJOS = [
+    "click verify once there are none left",
+    "click verify once there is none left",
+    "click verify once there are no more",
+    "click verify when there are none left",
+    "click verify when there is none left",
+    "click verify once you have selected all",
+    "then click verify once there are none left",
+    "then click verify",
+    "click verify",
     "if there are none", "if there is none", "if none", "if you see none",
     "if there are no other", "that are shown", "that contain", "that have",
     "containing", "in the image", "in the picture", "shown below",
     "with the", "below", "shown",
 ]
 RE_SUFIJO_PEGADO = re.compile(
-    r"(?:if|when)\s*(?:there\s*(?:are|is)\s*)?(?:none|no|any)", re.IGNORECASE)
+    r"(?:if|when|once)\s*(?:there\s*(?:are|is)\s*)?(?:none|no|any)"
+    r"|(?:then\s+)?click\s+verify\b", re.IGNORECASE)
 
 ARTICULOS = ["all of the", "all the", "every", "each", "all", "any",
              "the", "a", "an"]
@@ -96,6 +106,8 @@ def recortar_sufijos(texto: str) -> str:
     for sufijo in SUFIJOS:
         if t.endswith(sufijo):
             t = t[: -len(sufijo)].rstrip(" ,;:-")
+    # "…bridges Then click verify once there are none left" -> queda "then"
+    t = re.sub(r"\s+(?:and\s+)?then$", "", t, flags=re.I)
     # texto pegado sin espacio: "traffic lightsIf there are none"
     m = RE_SUFIJO_PEGADO.search(t)
     if m and m.start() > 0:

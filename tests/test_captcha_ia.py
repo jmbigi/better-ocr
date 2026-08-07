@@ -83,6 +83,18 @@ class TestParsearInstruccion(unittest.TestCase):
         self.assertEqual(parsear_instruccion("if there are traffic lights, click all"),
                          "traffic light")
 
+    def test_sufijo_click_verify(self):
+        # formato actual del DOM: "… Click verify once there are none left"
+        self.assertEqual(parsear_instruccion(
+            "Select all images with bicycles Click verify once there are none left"),
+            "bicycle")
+        self.assertEqual(parsear_instruccion(
+            "Select all images with bicyclesClick verify once there are none left"),
+            "bicycle")
+        self.assertEqual(parsear_instruccion(
+            "Select all images with bridges Then click verify once there are none left"),
+            "bridge")
+
     def test_articulos_y_conectores(self):
         self.assertEqual(parsear_instruccion("select squares with cars"), "car")
         self.assertEqual(parsear_instruccion("click all pictures of motorcycles"),
