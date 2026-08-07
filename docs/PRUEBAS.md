@@ -90,8 +90,9 @@ Piezas puras verificadas por tests (sin navegador ni motores):
 | Decisor por celda | umbral 0.45 clase objetivo / 0.6 resto; celdas sin detección → "inciertas" (no se descartan) | 8 tests |
 | Demo sintética `--local` | determinista (misma semilla → mismo PNG), veredicto OK en 3×3 y 4×4 | 4 tests + CLI real |
 | Orquestador (parte pura) | n_desde_tiles (9→3, 16→4, resto None), índice→(fila,col) | 3 tests |
+| Orquestador E2E local | flujo completo de Playwright contra una página falsa que replica el DOM de reCAPTCHA (ancla en iframe recaptcha, reto en bframe, tiles que registran clics, VERIFY que marca el ancla): instrucción→selección→clics JS→veredicto "ok" | 1 test de integración (2.4 s) |
 
-Total: 30 tests nuevos (suite completa 98/98 OK).
+Total: 31 tests nuevos (suite completa 99/99 OK).
 
 Pendientes (requieren ejecución en vivo o VLM libre):
 - Validar los selectores DOM de reCAPTCHA en vivo (`captcha_web.py`), SKIP y el veredicto real.

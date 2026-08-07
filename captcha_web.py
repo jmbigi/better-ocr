@@ -176,34 +176,40 @@ def veredicto(pagina, bframe) -> str:
     while time.monotonic() - t0 < TIEMPO_ESPERA_VEREDICTO:
         if bframe.locator(SELEC_ERROR).count() > 0:
             return "error"
-        # si el bframe se cerro o el checkbox ancla quedo marcado: exito
-        bframe_vivo = any("bframe" in (f.url or "") for f in pagina.frames)
-        if not bframe_vivo:
+        # si el bframe se cerro: exito
+        if not any("bframe" in (f.url or "") for f in pagina.frames):
             return "ok"
-        try:
-            ancla = pagina.frames[0].locator(SELEC_CHECKBOX)
-            clase = ancla.get_attribute("class") or ""
-            if "recaptcha-checkbox-checked" in clase:
-                return "ok"
-        except Exception:
-            pass
+        # el ancla vive en el iframe de reCAPTCHA (no en frames[0])
+        for f in pagina.frames:
+            if "recaptcha" in (f.url or ""):
+                try:
+                    clase = f.locator(SELEC_CHECKBOX).get_attribute("class") or ""
+                    if "recaptcha-checkbox-checked" in clase:
+                        return "ok"
+                except Exception:
+                    pass
+                break
         time.sleep(0.5)
     return "pendiente"
 
 
 def resolver_web(url: str, headed: bool = False, salida: str = "",
                  timeout_s: float = 150.0, max_intentos: int = 3,
-                 fallback_vlm=None) -> dict:
+                 fallback_vlm=None, detectar_lote=None) -> dict:
     """Ciclo completo real: checkbox -> reto -> instruccion -> tiles ->
     VERIFY/SKIP -> veredicto, con reintento tras re-render del reto.
 
     Import perezoso de Playwright (solo python del sistema); la deteccion va
     al venv por subproceso. `fallback_vlm(celdas_inciertas)` es un hook
     reservado (requiere un VLM libre: docbee/ollama); si no se pasa, las
-    celdas inciertas simplemente no se pulsan."""
+    celdas inciertas simplemente no se pulsan. `detectar_lote(celdas_pil)`
+    permite inyectar un detector (tests) en lugar del worker RT-DETR."""
     from playwright.sync_api import sync_playwright
 
     from captcha_ia import resolver
+
+    if detectar_lote is None:
+        detectar_lote = detectar_batch_worker
 
     t_inicio = time.monotonic()
     with sync_playwright() as pw:
@@ -257,7 +263,7 @@ def resolver_web(url: str, headed: bool = False, salida: str = "",
             # 4) resolucion: celdas + RT-DETR batch + decision
             celdas_pil = [(f, c, aumentar_escala(celda))
                           for f, c, celda in celdas_grid(imagen, n=n)]
-            detecciones = detectar_batch_worker(celdas_pil)
+            detecciones = detectar_lote(celdas_pil)
             if not any(detecciones.values()):
                 # el worker fallo (o el reto se re-renderizo a mitad):
                 # no pulsar a ciegas
