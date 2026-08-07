@@ -240,6 +240,8 @@
 
 **Lección:** "device=cpu" en la API de alto nivel de paddleocr no es garantía de CPU para los modelos DocVLM; verificar el dispositivo real con `paddle.device.get_device()` dentro del proceso y aislar con `CUDA_VISIBLE_DEVICES` cuando se exija CPU.
 
+**Ampliación (2026-08-07):** RT-DETR vía `paddlex.create_model` (build GPU del venv) aborta con el MISMO SIGABRT no determinista por el cudnn del pyenv — la pasada offline del servicio captcha funcionó 2 veces y luego falló 3 veces con código y entorno aparentemente idénticos (padre bash vs subprocess desde python: ambos crashearon con ruta válida; solo "funcionó" sin tocar el modelo). Fix aplicado: `CUDA_VISIBLE_DEVICES=""` al inicio de los workers del venv (detección y OCR) → RT-DETR en CPU, determinista, 2/2 pasadas idénticas (~30 s). Regla: **cualquier worker de paddlex en esta máquina debe forzar `CUDA_VISIBLE_DEVICES=""` (CPU) salvo que se quiera GPU con el env de la lección 17**; y un "funcionó una vez" no es evidencia de determinismo en este entorno.
+
 ## 19. Playwright: el auto-wait de los locators tarda 30 s en elementos ausentes (2026-08-07)
 
 **Fallo (en tests E2E del servicio captcha):** `locator.first.inner_text()` y `locator.first.evaluate(...)` sobre un selector que NO matchea esperan el timeout por defecto de Playwright (~30 s) ANTES de lanzar la excepción, aunque el bloque `try/except` ya estuviera preparado. El `count()` de los tests pasó de 34 s → 64 s → 96 s mientras se acumulaban estas esperas (una por selector inexistente, p. ej. la página falsa con el botón de VERIFY de otra clase).

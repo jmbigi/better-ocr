@@ -92,8 +92,9 @@ Piezas puras verificadas por tests (sin navegador ni motores):
 | Orquestador (parte pura) | n_desde_tiles (9→3, 16→4, resto None), índice→(fila,col) | 3 tests |
 | Orquestador E2E local | flujo completo de Playwright contra una página falsa que replica el DOM de reCAPTCHA (ancla en iframe recaptcha, reto en bframe, tiles que registran clics, VERIFY que marca el ancla): instrucción→selección→clics JS→veredicto "ok" | 2 tests de integración (4.6 s) |
 | Fallback OCR de instrucción | sin `div.rc-imageselect-desc`, la instrucción se obtiene por OCR (worker PP-OCRv6 inyectable) y el flujo sigue completo | cubierto por el 2º E2E |
+| Pasada offline con RT-DETR real | `captcha_web.py --offline` sobre la demo sintética con el worker real (CPU forzada, lección 18): 2/2 pasadas idénticas — 5 celdas detectadas, 0 buses (correcto: las figuras sintéticas no son buses) | 2 ejecuciones reales |
 
-Total: 32 tests nuevos (suite completa 100/100 OK).
+Total: 33 tests nuevos (suite completa 106/106 OK).
 
 Pendientes (requieren ejecución en vivo o VLM libre):
 - Selectores DOM reales ya validados por el programador en vivo (lección 19): tabla de clase variable, VERIFY `rc-button-default`, ancla por `/anchor`, `locale=en-US`; queda revalidar el veredicto real completo con `captcha_web.py --url ...`.
