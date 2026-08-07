@@ -250,9 +250,17 @@ def pulsar_tiles(bframe, seleccion: list, n: int) -> None:
 
 
 def pulsar_verificar(bframe) -> None:
-    """Pulsa VERIFY si existe (count() evita el auto-wait de 30 s)."""
+    """Pulsa VERIFY si existe. El clic REAL de Playwright dispara el POST de
+    verificacion (verificado en vivo: wrong -> api2/replaceimage); el clic JS
+    a veces se ignora en silencio. Clic JS como fallback (count() evita el
+    auto-wait de 30 s)."""
     try:
         if bframe.locator(SELEC_VERIFY).count() > 0:
+            try:
+                bframe.locator(SELEC_VERIFY).first.click(timeout=4000)
+                return
+            except Exception:
+                pass
             bframe.locator(SELEC_VERIFY).first.evaluate("el => el.click()")
     except Exception:
         pass
