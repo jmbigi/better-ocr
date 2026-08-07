@@ -298,7 +298,9 @@ class TestOrquestadorLocal(unittest.TestCase):
                                        fallback_vlm=stub_vlm, timeout_s=60)
         self.assertTrue(res["ok"], res)
         self.assertEqual(res["veredicto"], "ok")
-        self.assertEqual(llamadas, [("bus", [(0, 1), (2, 2)])])
+        # llamada 1: candidatos; llamada 2: celdas sin deteccion (recall)
+        self.assertEqual(llamadas[0], ("bus", [(0, 1), (2, 2)]))
+        self.assertEqual(len(llamadas[1][1]), 7)
         self.assertEqual(sorted(res["seleccion"]), [(0, 1)])
         with urllib.request.urlopen(
                 f"http://127.0.0.1:{self.puerto}/clics.json") as r:

@@ -632,17 +632,27 @@ def resolver_web(url: str, headed: bool = False, salida: str = "",
 
 def _aplicar_fallback_vlm(detecciones: dict, celdas_pil: list, clase: str,
                           umbral: float, fallback_vlm) -> dict:
-    """Dos etapas (patron DDG validado en vivo: RT-DETR 4 'birds' -> VLM 3
-    ducks): si el worker tiene candidatos de la clase objetivo, el VLM
-    binario confirma/descarta por tile; si NO hay ninguna deteccion (clase
-    no-COCO), el VLM cubre todas las celdas. Devuelve las detecciones
-    filtradas (las rechazadas por el VLM quedan vacias)."""
+    """Dos etapas + cobertura de huecos (patron DDG validado en vivo):
+
+    1. Los candidatos de la clase objetivo del worker se confirman/descartan
+       con el VLM binario por tile (4 'birds' -> 3 ducks).
+    2. Las celdas SIN NINGUNA deteccion (recall de tiles pequenos, medido en
+       vivo 2026-08-07: 13/16 celdas vacias en un 4x4 de traffic lights) se
+       re-evaluan con el mismo VLM: puede encontrar objetos que el detector
+       perdio.
+    3. Si el worker no detecto nada (clase no-COCO), el VLM cubre todas las
+       celdas.
+
+    Devuelve las detecciones filtradas/aumentadas. Sin fallback o sin clase
+    no cambia nada."""
     if fallback_vlm is None or not clase:
         return detecciones
     candidatas = [(f, c, celda) for (f, c, celda) in celdas_pil
                   if any(d.get("clase") == clase
                          and d.get("score", 0) >= umbral
                          for d in detecciones.get((f, c), []))]
+    inciertas = [(f, c, celda) for (f, c, celda) in celdas_pil
+                 if not detecciones.get((f, c), [])]
     if not candidatas:
         if any(detecciones.values()):
             return detecciones  # hay detecciones pero no de la clase: sin confirmar
@@ -651,6 +661,12 @@ def _aplicar_fallback_vlm(detecciones: dict, celdas_pil: list, clase: str,
     for (f, c, _) in candidatas:
         if (f, c) not in confirmadas:
             detecciones[(f, c)] = []
+    # pasada extra sobre las celdas sin ninguna deteccion (recall)
+    if inciertas:
+        encontradas = fallback_vlm(inciertas, clase) or {}
+        for (f, c, _) in inciertas:
+            if (f, c) in encontradas:
+                detecciones[(f, c)] = encontradas[(f, c)]
     return detecciones
 
 

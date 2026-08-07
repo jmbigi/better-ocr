@@ -95,7 +95,8 @@ class TestAplicarFallbackVLM(unittest.TestCase):
                 for f in range(n) for c in range(n)]
 
     def test_confirma_solo_candidatos(self):
-        # patron DDG: 2 candidatos de la clase -> el VLM confirma 1
+        # patron DDG: 2 candidatos de la clase -> el VLM confirma 1; las 7
+        # celdas sin deteccion se re-evaluan por separado (recall)
         det = {(0, 1): [{"clase": "bus", "score": 0.9}],
                (2, 2): [{"clase": "bus", "score": 0.6}]}
         recibidas = []
@@ -105,9 +106,28 @@ class TestAplicarFallbackVLM(unittest.TestCase):
             return {(0, 1): [{"clase": "bus", "score": 1.0}]}
 
         res = _aplicar_fallback_vlm(det, self._celdas(), "bus", 0.45, vlm)
-        self.assertEqual(recibidas, [("bus", [(0, 1), (2, 2)])])
+        # llamada 1: candidatos; llamada 2: las 7 celdas vacias
+        self.assertEqual(recibidas[0], ("bus", [(0, 1), (2, 2)]))
+        self.assertEqual(len(recibidas[1][1]), 7)
         self.assertEqual(res[(0, 1)][0]["clase"], "bus")
         self.assertEqual(res[(2, 2)], [])  # descartada por el VLM
+
+    def test_recall_vlm_encuentra_objetos_en_celdas_vacias(self):
+        # 4x4 de traffic lights (medido en vivo): 13/16 celdas sin deteccion;
+        # el VLM encuentra objetos perdidos en las celdas vacias
+        det = {(0, 0): [{"clase": "traffic light", "score": 0.88}]}
+        celdas = self._celdas(n=4)  # 16 celdas, 15 vacias
+
+        def vlm(celdas, clase):
+            if len(celdas) == 1:  # candidatos
+                return {(0, 0): [{"clase": "traffic light", "score": 1.0}]}
+            # celdas vacias: encuentra una mas
+            return {(3, 3): [{"clase": "traffic light", "score": 1.0}]}
+
+        res = _aplicar_fallback_vlm(det, celdas, "traffic light", 0.30, vlm)
+        self.assertEqual(res[(0, 0)][0]["clase"], "traffic light")
+        self.assertEqual(res[(3, 3)][0]["clase"], "traffic light")
+        self.assertEqual(sum(1 for v in res.values() if v), 2)
 
     def test_sin_detecciones_vlm_cubre_todas(self):
         recibidas = []
