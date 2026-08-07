@@ -210,6 +210,12 @@ def parsear_instruccion(texto: str):
     t = recortar_sufijos(t).strip(" ,;:.")
     if not t:
         return None
+    # Clases compuestas "X or Y" (p. ej. "mountains or hills", no-COCO):
+    # se conservan tal cual (frase del reto) como clase pasante para el VLM
+    # binario ("Does this image contain mountains or hills?"), no como
+    # basura; chequeado ANTES de singularizar (los plurales se respetan).
+    if re.fullmatch(r"[a-záéíóúüñ]+(?: or [a-záéíóúüñ]+)+", t):
+        return t
     canonico = singularizar(t)
     # Textos con espacios que no son una clase COCO multi-palabra conocida:
     # instruccion en otro idioma o sin clase (parser ingles) -> None

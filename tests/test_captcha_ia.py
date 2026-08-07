@@ -141,6 +141,14 @@ class TestParsearInstruccion(unittest.TestCase):
             with self.subTest(texto=texto):
                 self.assertEqual(parsear_instruccion(texto), esperado)
 
+    def test_clase_compuesta_con_or(self):
+        # caso real del reto en vivo (2026-08-07 run 1): "mountains or hills"
+        # no es COCO; se conserva como clase pasante para el VLM binario
+        self.assertEqual(parsear_instruccion(
+            "Select all images with mountains or hills"), "mountains or hills")
+        self.assertEqual(parsear_instruccion(
+            "select all images with cars or trucks"), "cars or trucks")
+
     def test_singular_no_se_toca(self):
         self.assertEqual(parsear_instruccion("select the bus"), "bus")
 
