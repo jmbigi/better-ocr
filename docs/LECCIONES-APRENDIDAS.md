@@ -239,3 +239,13 @@
 **Verificación del fix (2026-08-07, sin inferencia, venv del proyecto):** con `CUDA_VISIBLE_DEVICES=""` → `paddle.device.get_device()` devuelve `cpu`; sin la variable → `gpu:0`. El mecanismo de aislamiento queda confirmado; falta solo reejecutar A4 con el VLM para validarlo de punta a punta.
 
 **Lección:** "device=cpu" en la API de alto nivel de paddleocr no es garantía de CPU para los modelos DocVLM; verificar el dispositivo real con `paddle.device.get_device()` dentro del proceso y aislar con `CUDA_VISIBLE_DEVICES` cuando se exija CPU.
+
+## 19. Playwright: el auto-wait de los locators tarda 30 s en elementos ausentes (2026-08-07)
+
+**Fallo (en tests E2E del servicio captcha):** `locator.first.inner_text()` y `locator.first.evaluate(...)` sobre un selector que NO matchea esperan el timeout por defecto de Playwright (~30 s) ANTES de lanzar la excepción, aunque el bloque `try/except` ya estuviera preparado. El `count()` de los tests pasó de 34 s → 64 s → 96 s mientras se acumulaban estas esperas (una por selector inexistente, p. ej. la página falsa con el botón de VERIFY de otra clase).
+
+**Solución:** comprobar `locator.count() > 0` antes de `inner_text()`/`evaluate()` (count() no espera). Aplicado en `leer_instruccion` y `pulsar_verificar` de `captcha_web.py`. Con el patrón aplicado, los 2 tests E2E pasan en 4.6 s.
+
+**Hallazgo asociado (DOM real de reCAPTCHA, validado en vivo por el programador):** la clase de la tabla de tiles varía con el tamaño del reto (`rc-imageselect-table-33`/`rc-imageselect-table-44`), el botón VERIFY actual es `rc-button-default` (histórico: `rc-button-go`), y la URL de la página anfitriona puede contener "recaptcha" — el iframe del ancla se detecta por `/anchor` en la URL y excluyendo el frame principal. También: `locale="en-US"` fija el idioma de las instrucciones (el parser es inglés).
+
+**Lección:** en Playwright, "el elemento no existe" cuesta 30 s por locator si no se hace `count()` antes; y los selectores de widgets de terceros cambian entre versiones — la página falsa de tests debe replicar los selectores validados en vivo, no los que uno supone.
