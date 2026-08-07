@@ -251,3 +251,25 @@
 **Hallazgo asociado (DOM real de reCAPTCHA, validado en vivo por el programador):** la clase de la tabla de tiles varía con el tamaño del reto (`rc-imageselect-table-33`/`rc-imageselect-table-44`), el botón VERIFY actual es `rc-button-default` (histórico: `rc-button-go`), y la URL de la página anfitriona puede contener "recaptcha" — el iframe del ancla se detecta por `/anchor` en la URL y excluyendo el frame principal. También: `locale="en-US"` fija el idioma de las instrucciones (el parser es inglés).
 
 **Lección:** en Playwright, "el elemento no existe" cuesta 30 s por locator si no se hace `count()` antes; y los selectores de widgets de terceros cambian entre versiones — la página falsa de tests debe replicar los selectores validados en vivo, no los que uno supone.
+
+## 20. reCAPTCHA v2 en vivo (demo Google): loop completo funcional, precisión es el límite (2026-08-07)
+
+**Contexto:** validación en vivo contra `https://www.google.com/recaptcha/api2/demo` con `captcha_web.py` (stack local: Playwright + RT-DETR-L del venv + OCR PP-OCRv6 de respaldo). Esta lección completa el §7 de PRUEBAS.md con lo verificado en ejecución real.
+
+**Hallazgo 1 — clic real de Playwright en VERIFY dispara el POST; el JS a veces se ignora:** con `el.click()` (untested) Google no siempre procesa el envío. Con `locator.click()` (evento confiable) el envío llega siempre: respuesta incorrecta → POST `api2/replaceimage` + payload nuevo (sin texto de error en la demo; el `.rc-imageselect-error-response` queda vacío). El veredicto no debe esperar el mensaje de error: usa el reemplazo de imagen/cierre del bframe.
+
+**Hallazgo 2 — la selección vacía + VERIFY es ignorada en silencio:** si no se pulsó ningún tile (p. ej. clase no-COCO sin VLM: crosswalks) y se pulsa VERIFY, Google NO responde (ni replaceimage ni error ni check) y el reto queda clavado con la misma imagen. Detectado: grid idéntico entre intentos consecutivos (md5 igual). Para la variante "If there are none, click skip" la respuesta correcta es SKIP (no VERIFY vacío); el orquestador ya lo hace.
+
+**Hallazgo 3 — el clic JS en tiles sí registra:** tras `el.click()` el td queda `rc-imageselect-tile rc-imageselect-tileselected` (headless y headed). El clic normal de Playwright falla por los transforms ("outside of viewport"), como ya se sabía.
+
+**Hallazgo 4 — precisión real medida en cuadrículas:** 4×4 de motos: las motos reales en (1,2) puntuaron 0.24-0.28 (bajo el umbral 0.45) → selección incompleta → rechazo (replaceimage). 3×3 de bicicletas: 0.82 y 0.55 detectadas; aun así rechazado (adversario o más celdas reales perdidas). Coincide con la medición previa del programador (~50-70%, rechazado igual). El umbral fijo es el eslabón débil: los tiles 4×4 (más chicos) puntúan aún más bajo.
+
+**Hallazgo 5 — env de los workers (lección 17) aplicado a captcha_web:** sin `env_worker()` los subprocesos del venv morían con SIGABRT por el cudnn 9.1 del pyenv (`undefined symbol: cudnnGetLibConfig`) al detectar en GPU. Con el env corregido: RT-DETR-L GPU 8 s totales (carga + inferencia de un tile). El worker del proyecto ya usaba `modo_objetos_lote` (una sola carga del modelo).
+
+**Hallazgo 6 — formato de instrucción actual del DOM:** `"Select all images with X Click verify once there are none left."` (y variante `"…Then click verify…"`). El parser requería los sufijos "click verify once there are none left"/"then click verify" y el recorte de "then" final; cubierto con tests. El desc puede renderizarse un instante después de la cuadrícula: leer con reintentos breves antes de caer al OCR.
+
+**Hallazgo 7 — la demo puede venir sin desc (variante noaccess):** DOM vacío en ~1 de cada 3 retos; el fallback OCR (PP-OCRv6 sobre la franja superior del payload) lo resuelve en ~9 s con modelo en caché ("Select all images with a bus Click verify once there are none left.").
+
+**Hallazgo 8 — esta IP bloquea buscadores por curl y Playwright:** Google (sorry page), Bing/DDG/Brave/Ecosia/Mojeek/Startpage (captcha/challenge/403) y SAIJ (403). Los endpoints de reCAPTCHA (`api2/anchor`, `api2/bframe`) SÍ funcionan, y la demo appspot falló una vez por red intermitente (`ERR_NETWORK_CHANGED`) y funcionó al reintentar (lección 4).
+
+**Lección general:** el loop mecánico (checkbox → reto → instrucción DOM/OCR → cuadrícula → RT-DETR por celda → clics → VERIFY → feedback por replaceimage → reintento) está completo y verificado en vivo; el rendimiento real lo limita la precisión del detector sobre tiles pequeños/adversarios y las clases no-COCO (requieren el hook `fallback_vlm`, aún sin cablear). Cualquier reporte de éxito en vivo debe adjuntar las capturas guardadas y las detecciones por celda (P0.1).
