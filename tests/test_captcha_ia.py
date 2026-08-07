@@ -6,7 +6,26 @@ Ejecutar: python3 -m unittest discover -s tests -v
 
 import unittest
 
-from captcha_ia import parsear_instruccion, recortar_sufijos, singularizar
+from PIL import Image
+
+from captcha_ia import (
+    aumentar_escala,
+    celdas_grid,
+    parsear_instruccion,
+    recortar_sufijos,
+    singularizar,
+)
+
+
+def imagen_sintetica(n=3, tam=300, color=(200, 50, 50)):
+    """Imagen de prueba: n x n bloques de color con borde oscuro (cuadricula)."""
+    im = Image.new("RGB", (tam, tam), (0, 0, 0))
+    for fila in range(n):
+        for col in range(n):
+            for y in range(fila * tam // n + 2, (fila + 1) * tam // n - 2):
+                for x in range(col * tam // n + 2, (col + 1) * tam // n - 2):
+                    im.putpixel((x, y), color)
+    return im
 
 
 class TestSingularizar(unittest.TestCase):
@@ -72,6 +91,43 @@ class TestParsearInstruccion(unittest.TestCase):
 
     def test_singular_no_se_toca(self):
         self.assertEqual(parsear_instruccion("select the bus"), "bus")
+
+
+class TestGeometriaGrid(unittest.TestCase):
+    def test_celdas_3x3(self):
+        im = imagen_sintetica(n=3, tam=300)
+        celdas = celdas_grid(im, n=3, margen_frac=0.06)
+        self.assertEqual(len(celdas), 9)
+        filas_cols = [(f, c) for f, c, _ in celdas]
+        self.assertEqual(sorted(filas_cols),
+                         sorted((f, c) for f in range(3) for c in range(3)))
+        tam_celda = min(im.size) // 3
+        margen = max(1, int(tam_celda * 0.06))
+        ancho_esperado = tam_celda - 2 * margen
+        for _, _, celda in celdas:
+            self.assertEqual(celda.size, (ancho_esperado, ancho_esperado))
+
+    def test_margen_excluye_borde_de_cuadricula(self):
+        # el borde de la cuadricula es negro; con margen, el pixel central de
+        # la celda (0,0) debe ser del color de relleno, no del borde
+        im = imagen_sintetica(n=3, tam=300, color=(200, 50, 50))
+        _, _, celda = celdas_grid(im, n=3)[0]
+        self.assertEqual(celda.getpixel((2, 2)), (200, 50, 50))
+
+    def test_cuadricula_4x4(self):
+        im = imagen_sintetica(n=4, tam=400)
+        self.assertEqual(len(celdas_grid(im, n=4)), 16)
+
+    def test_n_no_soportado(self):
+        im = imagen_sintetica(n=3)
+        with self.assertRaises(AssertionError):
+            celdas_grid(im, n=7)
+
+    def test_upscale_lanczos_2x(self):
+        im = Image.new("RGB", (60, 60), (10, 20, 30))
+        grande = aumentar_escala(im, factor=2)
+        self.assertEqual(grande.size, (120, 120))
+        self.assertEqual(grande.getpixel((60, 60)), (10, 20, 30))
 
 
 if __name__ == "__main__":

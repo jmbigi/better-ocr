@@ -186,3 +186,35 @@ def parsear_instruccion(texto: str):
                     "none", "object", "objects", "her", "him", "it"}:
         return None
     return canonico
+
+
+def aumentar_escala(imagen, factor: int = 2):
+    """Upscale del tile con LANCZOS: los objetos pequenos de los retos
+    (3x3/4x4) puntuan ~0.5-0.6 y con 2x el detector los ve mejor."""
+    from PIL import Image as PILImage  # import perezoso (dependencia opcional)
+
+    return imagen.resize((imagen.width * factor, imagen.height * factor),
+                         resample=PILImage.LANCZOS)
+
+
+def celdas_grid(imagen, n: int = 3, margen_frac: float = 0.06):
+    """Divide la imagen en n x n celdas cuadradas con un margen interno por
+    celda (excluye bordes/lineas de la cuadricula del reto).
+
+    Devuelve lista de (fila, col, imagen_recortada).
+    """
+    assert n in (2, 3, 4, 5), f"cuadricula {n}x{n} no soportada"
+    ancho, alto = imagen.size
+    tam_celda = min(ancho, alto) // n
+    margen = max(1, int(tam_celda * margen_frac))
+    offset_x = (ancho - tam_celda * n) // 2
+    offset_y = (alto - tam_celda * n) // 2
+    celdas = []
+    for fila in range(n):
+        for col in range(n):
+            x0 = offset_x + col * tam_celda
+            y0 = offset_y + fila * tam_celda
+            celdas.append((fila, col, imagen.crop(
+                (x0 + margen, y0 + margen,
+                 x0 + tam_celda - margen, y0 + tam_celda - margen))))
+    return celdas
