@@ -101,8 +101,9 @@ Piezas puras verificadas por tests (sin navegador ni motores):
 | Fallback VLM en modo offline | `--offline --vlm-fallback`: worker vacío (clase no-COCO) dispara el hook con la clase parseada, sin navegador — permite afinar el VLM sobre cuadrículas guardadas | 2 tests (worker y VLM simulados) |
 | Fallback VLM en vivo (ollama) | primera validación real: arranque bajo demanda OK, pregunta binaria por celda, ~1 s/celda con modelo en caché, parseo si/no OK. **Hallazgo: gemma3:4b dice "No" a TODAS las figuras sintéticas de la demo** (rectángulos abstractos: recall 0/3 en buses) — la demo sintética no sirve para medir el VLM; los tiles reales requieren la pasada en vivo o cuadrículas guardadas | ejecución real 2026-08-07 (ollama detenido tras la prueba, estado restaurado) |
 | Confirmación VLM de dos etapas | patrón DDG validado en vivo por el programador (RT-DETR 4 "birds" → VLM 3 ducks): los candidatos de la clase objetivo del worker se confirman/descartan con el VLM binario por tile; sin detecciones (no-COCO) el VLM cubre todas las celdas. `_aplicar_fallback_vlm` compartido por real y offline | 5 tests unitarios + 1 E2E (falso positivo descartado) |
+| Contrato API ollama | payload de `/api/generate` blindado (modelo, prompt binario, imagen base64, temperatura 0, sin stream) | 1 test |
 
-Total: 54 tests nuevos (suite completa 127/127 OK).
+Total: 55 tests nuevos (suite completa 128/128 OK).
 
 Pendientes (requieren ejecución en vivo o VLM libre):
 - Validación real contra la demo oficial de Google
