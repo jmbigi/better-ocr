@@ -138,6 +138,19 @@ def singularizar(texto: str) -> str:
     return t
 
 
+# Clases COCO multi-palabra que SI son clases validas (el resto de textos
+# con espacios tras singularizar son instrucciones no reconocidas: el parser
+# es ingles y una instruccion en otro idioma no debe producir basura — una
+# clase imposible dejaria la seleccion vacia y VERIFY se ignoraria en
+# silencio, hallazgo 2 de la leccion 20).
+CLASES_MULTI_PALABRA = {
+    "traffic light", "fire hydrant", "stop sign", "parking meter",
+    "sports ball", "baseball bat", "baseball glove", "tennis racket",
+    "wine glass", "hot dog", "potted plant", "dining table", "cell phone",
+    "teddy bear", "hair drier", "remote control",
+}
+
+
 def parsear_instruccion(texto: str):
     """Extrae la clase objetivo de una instrucción reCAPTCHA v2.
 
@@ -198,6 +211,10 @@ def parsear_instruccion(texto: str):
     if not t:
         return None
     canonico = singularizar(t)
+    # Textos con espacios que no son una clase COCO multi-palabra conocida:
+    # instruccion en otro idioma o sin clase (parser ingles) -> None
+    if " " in canonico and canonico not in CLASES_MULTI_PALABRA:
+        return None
     # Palabras que no son clases (solo soporte de la frase, no el objeto)
     if canonico in {"image", "images", "picture", "pictures", "photo",
                     "photos", "tile", "tiles", "square", "squares", "here",

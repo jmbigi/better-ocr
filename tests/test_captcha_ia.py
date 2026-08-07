@@ -120,6 +120,27 @@ class TestParsearInstruccion(unittest.TestCase):
             "Select all images with bicycles Click verify once there are none left"),
             "bicycle")
 
+    def test_instruccion_en_otro_idioma_devuelve_none(self):
+        # el DOM real guardado traia el desc en espanol: el parser ingles
+        # no debe devolver basura (seleccion vacia -> VERIFY ignorado en
+        # silencio, hallazgo 2 leccion 20), sino None (-> SKIP)
+        for texto in ["Selecciona todas las imágenes con escaleras",
+                      "Haga clic en las imágenes con semáforos",
+                      "Klicken Sie auf alle Bilder mit Bussen"]:
+            with self.subTest(texto=texto):
+                self.assertIsNone(parsear_instruccion(texto))
+
+    def test_clases_multi_palabra_siguen_funcionando(self):
+        casos = {
+            "select all traffic lights": "traffic light",
+            "select all fire hydrants": "fire hydrant",
+            "select all stop signs": "stop sign",
+            "select all parking meters": "parking meter",
+        }
+        for texto, esperado in casos.items():
+            with self.subTest(texto=texto):
+                self.assertEqual(parsear_instruccion(texto), esperado)
+
     def test_singular_no_se_toca(self):
         self.assertEqual(parsear_instruccion("select the bus"), "bus")
 
