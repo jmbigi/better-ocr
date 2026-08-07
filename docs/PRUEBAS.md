@@ -107,8 +107,9 @@ Piezas puras verificadas por tests (sin navegador ni motores):
 | Fix selector `desc-no-canonical` | el DOM real usa `rc-imageselect-desc-no-canonical` (no `rc-imageselect-desc`): el grep por substring daba falso positivo y `leer_instruccion` devolvía "" (flujo caía a SKIP — explica parte del "sin éxito" en vivo). Selector ampliado + E2E con la clase real | 1 E2E (129/129) |
 | OCR lee el desc real + parser multi-idioma | el desc real del DOM guardado está en español ("Selecciona todas las imágenes con escaleras"): PP-OCRv6 lo lee exacto (tildes incluidas, renderizado 352px/16px+28px), pero el parser inglés devolvía basura (→ selección vacía → VERIFY ignorado en silencio). Guard de clases COCO multi-palabra: ahora devuelve None (→ SKIP); las clases multi-palabra reales (traffic light, fire hydrant, stop sign, parking meter) siguen parseando | 7 tests (131/131) |
 | **Primer veredicto "ok" EN VIVO** | demo oficial de Google, 2026-08-07 13:43: instrucción del DOM "Select all images with cars" (con salto de línea, normalizada por el parser), 4 celdas seleccionadas por RT-DETR (scores 0.89/0.87/0.67/0.90), VERIFY → checkbox ancla marcado → **ok al intento 1 en 24.9 s** | `resultado.json` + `intentos.json` + captura guardados en `/var/tmp/captcha_real/`; sin procesos residuales |
+| **Repetibilidad en vivo (n=3)** | 2026-08-07 13:47-13:52, 3 ejecuciones seguidas contra la demo oficial: **2/3 ok** (66.7% — consistente con la precisión histórica ~50-70% del programador): run 2 ok (bus, 3 celdas, 23.7 s), run 3 ok (car, 4 celdas, 23.0 s), run 1 fallo — instrucción "Select all images with mountains or hills" (clase compuesta "or", no-COCO): el parser devolvía None → SKIP sin botón → pendiente. **Fix aplicado**: las clases "X or Y" se conservan como clase pasante para el VLM binario (con `--vlm-fallback` la resolvería) | `intentos.json` de cada run en `/var/tmp/captcha_real/r{1,2,3}/` |
 
-Total: 63 tests nuevos (suite completa 131/131 OK).
+Total: 65 tests nuevos (suite completa 133/133 OK).
 
 Pendientes (requieren ejecución en vivo o VLM libre):
 - Validación real contra la demo oficial de Google
