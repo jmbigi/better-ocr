@@ -12,6 +12,7 @@ Ejecutar: python3 -m unittest discover -s tests -v
 """
 
 import json
+import os
 import threading
 import unittest
 import urllib.request
@@ -273,6 +274,36 @@ class TestOrquestadorLocal(unittest.TestCase):
             pulsados = json.loads(r.read().decode())
         self.assertEqual(pulsados, [4])  # (1,1)
 
+    def test_confirmacion_vlm_descarta_candidato(self):
+        """Patron DDG: el worker encuentra 2 candidatos de la clase, el VLM
+        binario confirma solo 1 (el otro era falso positivo) -> solo se
+        pulsa la celda confirmada."""
+        import captcha_web
+
+        Handler.clics = []
+        url = f"http://127.0.0.1:{self.puerto}/"
+
+        def stub_detector(celdas_pil):
+            return {(0, 1): [{"clase": "bus", "score": 0.9}],
+                    (2, 2): [{"clase": "bus", "score": 0.6}]}
+
+        llamadas = []
+
+        def stub_vlm(celdas, clase):
+            llamadas.append((clase, sorted((f, c) for f, c, _ in celdas)))
+            return {(0, 1): [{"clase": "bus", "score": 1.0}]}
+
+        res = captcha_web.resolver_web(url, detectar_lote=stub_detector,
+                                       fallback_vlm=stub_vlm, timeout_s=60)
+        self.assertTrue(res["ok"], res)
+        self.assertEqual(res["veredicto"], "ok")
+        self.assertEqual(llamadas, [("bus", [(0, 1), (2, 2)])])
+        self.assertEqual(sorted(res["seleccion"]), [(0, 1)])
+        with urllib.request.urlopen(
+                f"http://127.0.0.1:{self.puerto}/clics.json") as r:
+            pulsados = json.loads(r.read().decode())
+        self.assertEqual(pulsados, [1])  # solo (0,1)
+
     def test_variante_none_click_skip(self):
         """'If there are no crosswalks, click skip' (leccion 20): el parser
         devuelve None (no hay clase) y el orquestador pulsa SKIP sin tiles."""
@@ -295,6 +326,34 @@ class TestOrquestadorLocal(unittest.TestCase):
                 f"http://127.0.0.1:{self.puerto}/clics.json") as r:
             pulsados = json.loads(r.read().decode())
         self.assertEqual(pulsados, [])
+
+    def test_fallo_escribre_intentos_json_analizable(self):
+        """Una ejecucion sin exito con --salida debe dejar intentos.json con
+        la decision y los scores por celda (P0.1: fallos analizables)."""
+        import tempfile
+        import captcha_web
+
+        Handler.clics = []
+        Handler.errores_antes_de_ok = 1  # el reto nunca llega a ok
+        self.addCleanup(setattr, Handler, "errores_antes_de_ok", 0)
+        url = f"http://127.0.0.1:{self.puerto}/"
+        salida = tempfile.mkdtemp(prefix="captcha_salida_")
+
+        def stub_detector(celdas_pil):
+            return {(0, 0): [{"clase": "bus", "score": 0.9}]}
+
+        res = captcha_web.resolver_web(url, detectar_lote=stub_detector,
+                                       timeout_s=60, max_intentos=1,
+                                       salida=salida)
+        self.assertFalse(res["ok"], res)
+        with open(os.path.join(salida, "intentos.json"), encoding="utf-8") as f:
+            registro = json.load(f)
+        self.assertEqual(len(registro), 1)
+        self.assertEqual(registro[0]["intento"], 1)
+        self.assertEqual(registro[0]["clase_objetivo"], "bus")
+        self.assertEqual(registro[0]["seleccion"], [[0, 0]])  # JSON: listas
+        self.assertEqual(registro[0]["detecciones_por_celda"]["0,0"][0]["clase"],
+                         "bus")
 
 
 if __name__ == "__main__":

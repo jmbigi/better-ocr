@@ -517,6 +517,7 @@ def resolver_web(url: str, headed: bool = False, salida: str = "",
         from captcha_ia import aumentar_escala, celdas_grid
 
         resultado = None
+        registro = []
         for intento in range(1, max_intentos + 1):
             if time.monotonic() - t_inicio > timeout_s:
                 navegador.close()
@@ -540,18 +541,21 @@ def resolver_web(url: str, headed: bool = False, salida: str = "",
                           for f, c, celda in celdas_grid(imagen, n=n)]
             detecciones = detectar_lote(celdas_pil)
             es_variante_none = "skip" in instruccion.lower()
+            if not es_variante_none and fallback_vlm is not None:
+                from captcha_ia import parsear_instruccion
+                clase = parsear_instruccion(instruccion)
+                if clase and bframe.locator(SELEC_TILES).count() >= 4:
+                    detecciones = _aplicar_fallback_vlm(
+                        detecciones, celdas_pil, clase,
+                        umbral_objetivo or umbral_objetivo_para(n),
+                        fallback_vlm)
             if not any(detecciones.values()) and not es_variante_none:
-                # el worker fallo, el reto se re-renderizo a mitad, o la
-                # clase no es COCO (crosswalks/stairs): no pulsar a ciegas
-                if fallback_vlm is not None:
-                    from captcha_ia import parsear_instruccion
-                    clase = parsear_instruccion(instruccion)
-                    if clase and bframe.locator(SELEC_TILES).count() >= 4:
-                        detecciones = fallback_vlm(celdas_pil, clase)
-                if not any(detecciones.values()):
-                    continue  # reintentar con la nueva captura
-                # la variante "click skip" NO es clic a ciegas: se deja
-                # pasar para que el camino SKIP la resuelva
+                # el worker fallo o el reto se re-renderizo a mitad, o la
+                # clase no es COCO y el VLM tampoco encontro nada: no pulsar
+                # a ciegas; reintentar con la nueva captura
+                continue
+            # la variante "click skip" NO es clic a ciegas: se deja
+            # pasar para que el camino SKIP la resuelva
 
             def detectar_celda(_celda, fila, col):
                 return detecciones.get((fila, col), [])
@@ -579,6 +583,26 @@ def resolver_web(url: str, headed: bool = False, salida: str = "",
                     imagen.save(os.path.join(salida, f"reto_{n}x{n}_i{intento}.png"))
                 except Exception:
                     pass
+            # registro por intento (P0.1: los fallos en vivo deben ser
+            # analizables: instruccion, decision y scores por celda)
+            registro.append({
+                "intento": intento,
+                "instruccion": instruccion,
+                "n": n,
+                "clase_objetivo": res.get("clase_objetivo"),
+                "seleccion": sorted(res.get("seleccion", [])),
+                "descartadas": sorted(res.get("descartadas", [])),
+                "inciertas": sorted(res.get("inciertas", [])),
+                "detecciones_por_celda": {
+                    f"{f},{c}": detecciones.get((f, c), [])
+                    for f, c, _ in celdas_pil
+                },
+                "veredicto": resultado,
+            })
+            if salida:
+                with open(os.path.join(salida, "intentos.json"), "w",
+                          encoding="utf-8") as f:
+                    json.dump(registro, f, ensure_ascii=False, indent=2)
             if resultado == "ok":
                 camino = "skip" if not res["ok"] else "tiles"
                 if salida:
@@ -604,6 +628,30 @@ def resolver_web(url: str, headed: bool = False, salida: str = "",
                 "tiempo_s": round(time.monotonic() - t_inicio, 1)}
 
 
+def _aplicar_fallback_vlm(detecciones: dict, celdas_pil: list, clase: str,
+                          umbral: float, fallback_vlm) -> dict:
+    """Dos etapas (patron DDG validado en vivo: RT-DETR 4 'birds' -> VLM 3
+    ducks): si el worker tiene candidatos de la clase objetivo, el VLM
+    binario confirma/descarta por tile; si NO hay ninguna deteccion (clase
+    no-COCO), el VLM cubre todas las celdas. Devuelve las detecciones
+    filtradas (las rechazadas por el VLM quedan vacias)."""
+    if fallback_vlm is None or not clase:
+        return detecciones
+    candidatas = [(f, c, celda) for (f, c, celda) in celdas_pil
+                  if any(d.get("clase") == clase
+                         and d.get("score", 0) >= umbral
+                         for d in detecciones.get((f, c), []))]
+    if not candidatas:
+        if any(detecciones.values()):
+            return detecciones  # hay detecciones pero no de la clase: sin confirmar
+        return fallback_vlm(celdas_pil, clase) or detecciones
+    confirmadas = fallback_vlm(candidatas, clase) or {}
+    for (f, c, _) in candidatas:
+        if (f, c) not in confirmadas:
+            detecciones[(f, c)] = []
+    return detecciones
+
+
 def resolver_offline(imagen_ruta: str, n: int, instruccion: str,
                      umbral_objetivo: float = None,
                      fallback_vlm=None) -> dict:
@@ -624,10 +672,10 @@ def resolver_offline(imagen_ruta: str, n: int, instruccion: str,
     celdas_pil = [(f, c, aumentar_escala(celda))
                   for f, c, celda in celdas_grid(imagen, n=n)]
     detecciones = detectar_batch_worker(celdas_pil)
-    if not any(detecciones.values()) and fallback_vlm is not None:
+    if fallback_vlm is not None:
         clase = parsear_instruccion(instruccion)
-        if clase:
-            detecciones = fallback_vlm(celdas_pil, clase)
+        detecciones = _aplicar_fallback_vlm(detecciones, celdas_pil, clase,
+                                            umbral_objetivo, fallback_vlm)
 
     def detectar_celda(_celda, fila, col):
         return detecciones.get((fila, col), [])

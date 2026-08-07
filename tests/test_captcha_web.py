@@ -8,6 +8,7 @@ import unittest
 from unittest import mock
 
 from captcha_web import (
+    _aplicar_fallback_vlm,
     fallback_vlm_ollama,
     indice_a_fila_col,
     n_desde_tiles,
@@ -82,6 +83,51 @@ class TestIndiceAFilaCol(unittest.TestCase):
         self.assertEqual(indice_a_fila_col(3, 3), (1, 0))
         self.assertEqual(indice_a_fila_col(8, 3), (2, 2))
         self.assertEqual(indice_a_fila_col(15, 4), (3, 3))
+
+
+class TestAplicarFallbackVLM(unittest.TestCase):
+    def _celdas(self, n=3):
+        from PIL import Image
+        return [(f, c, Image.new("RGB", (30, 30)))
+                for f in range(n) for c in range(n)]
+
+    def test_confirma_solo_candidatos(self):
+        # patron DDG: 2 candidatos de la clase -> el VLM confirma 1
+        det = {(0, 1): [{"clase": "bus", "score": 0.9}],
+               (2, 2): [{"clase": "bus", "score": 0.6}]}
+        recibidas = []
+
+        def vlm(celdas, clase):
+            recibidas.append((clase, sorted((f, c) for f, c, _ in celdas)))
+            return {(0, 1): [{"clase": "bus", "score": 1.0}]}
+
+        res = _aplicar_fallback_vlm(det, self._celdas(), "bus", 0.45, vlm)
+        self.assertEqual(recibidas, [("bus", [(0, 1), (2, 2)])])
+        self.assertEqual(res[(0, 1)][0]["clase"], "bus")
+        self.assertEqual(res[(2, 2)], [])  # descartada por el VLM
+
+    def test_sin_detecciones_vlm_cubre_todas(self):
+        recibidas = []
+
+        def vlm(celdas, clase):
+            recibidas.append(len(celdas))
+            return {(1, 1): [{"clase": "crosswalk", "score": 1.0}]}
+
+        res = _aplicar_fallback_vlm({}, self._celdas(), "crosswalk", 0.45, vlm)
+        self.assertEqual(recibidas, [9])
+        self.assertEqual(res[(1, 1)][0]["clase"], "crosswalk")
+
+    def test_detecciones_sin_la_clase_no_llama_al_vlm(self):
+        det = {(0, 0): [{"clase": "car", "score": 0.8}]}
+        res = _aplicar_fallback_vlm(det, self._celdas(), "bus", 0.45,
+                                    lambda celdas, clase: (_ for _ in ()).throw(
+                                        AssertionError("no debe llamarse")))
+        self.assertEqual(res, det)
+
+    def test_sin_fallback_no_cambia_nada(self):
+        det = {(0, 1): [{"clase": "bus", "score": 0.9}]}
+        res = _aplicar_fallback_vlm(det, self._celdas(), "bus", 0.45, None)
+        self.assertEqual(res, det)
 
 
 class TestResolverOffline(unittest.TestCase):
