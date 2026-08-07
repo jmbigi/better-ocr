@@ -274,6 +274,23 @@ class TestChartServer(unittest.TestCase):
             codigo, _ = e.code, e.read().decode()
         self.assertEqual(codigo, 413)
 
+    def test_chart_413_envia_connection_close(self):
+        # Blindaje leccion 12: la respuesta 413 debe declarar Connection: close
+        # (inocuo con HTTP/1.0; evita que el cuerpo residual corrompa la
+        # siguiente peticion si alguien activa protocol_version HTTP/1.1).
+        r = urllib.request.Request(
+            self.BASE + "/chart",
+            data=b"x" * (chart_server.MAX_CUERPO + 1),
+            method="POST",
+            headers={"Content-Type": "application/json"},
+        )
+        try:
+            with urllib.request.urlopen(r) as resp:
+                self.fail("deberia rechazarse con 413")
+        except urllib.error.HTTPError as e:
+            self.assertEqual(e.code, 413)
+            self.assertEqual(e.headers.get("Connection", "").lower(), "close")
+
     def test_ruta_desconocida(self):
         codigo, _ = self._req("/otra")
         self.assertEqual(codigo, 404)

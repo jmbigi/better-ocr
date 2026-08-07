@@ -91,6 +91,12 @@ def crear_handler(modelo, estado):
             self.send_response(codigo)
             self.send_header("Content-Type", "application/json; charset=utf-8")
             self.send_header("Content-Length", str(len(cuerpo)))
+            if codigo == 413:
+                # Blindaje (leccion 12): con protocol_version HTTP/1.0 la
+                # conexion se cierra tras cada respuesta y esto es inocuo;
+                # si alguien activa HTTP/1.1, el cuerpo residual del 413
+                # corromperia la request line de la siguiente peticion.
+                self.send_header("Connection", "close")
             self.end_headers()
             self.wfile.write(cuerpo)
 
