@@ -352,25 +352,43 @@ def celda_de_bbox(bbox: list, n: int, ancho: float, alto: float):
     return None
 
 
+# Worker de deteccion sobre la imagen COMPLETA del reto (mejor recall que
+# por celda, medido en el corpus 2026-08-07): RT-DETR sobre la cuadricula
+# entera, bboxes mapeados a celdas por el centro (celda_de_bbox). Corre en
+# el venv por subproceso con CPU forzada (leccion 18) para funcionar desde
+# el python del sistema.
+WORKER_GRID = r"""
+import json, os, sys
+sys.path.insert(0, %(raiz)r)
+os.environ.setdefault("TMPDIR", "/var/tmp")
+os.environ["CUDA_VISIBLE_DEVICES"] = ""
+from vision import modo_objetos_lote
+ruta = sys.argv[1]
+json.dump(modo_objetos_lote([ruta]), sys.stdout)
+"""
+
+
 def detectar_cuadricula_worker(imagen, n: int) -> dict:
     """Deteccion RT-DETR sobre la imagen COMPLETA del reto, mapeada a celdas
-    por el centro del bbox (una sola carga del modelo via modo_objetos_lote).
+    por el centro del bbox. Subproceso del venv (WORKER_GRID), una sola
+    carga del modelo, CPU forzada.
 
     Mejor recall que la deteccion por celda (las celdas recortadas pierden
-    el contexto de la escena): medido en el corpus, 4/9 casos de
-    sub-seleccion recuperaron objetos con la imagen completa.
+    el contexto de la escena): corpus de 58 fallos, plausibles 22 -> 26.
     """
-    from PIL import Image
-
-    from vision import modo_objetos_lote  # import perezoso (paddle)
-
     with tempfile.TemporaryDirectory(prefix="captcha_grid_") as directorio:
         ruta = os.path.join(directorio, "cuadricula.png")
         imagen.save(ruta)
-        res = modo_objetos_lote([ruta])
+        script = WORKER_GRID % {"raiz": os.path.dirname(os.path.abspath(__file__))}
+        proc = subprocess.run(
+            [VENV_PYTHON, "-c", script, ruta],
+            capture_output=True, text=True, timeout=300)
+        if proc.returncode != 0:
+            return {}
+        salida = json.loads(proc.stdout)
     ancho, alto = imagen.size
     detecciones = {}
-    for det in res.get(ruta, []):
+    for det in salida.get(ruta, []):
         celda = celda_de_bbox(det.get("bbox", []), n, ancho, alto)
         if celda is not None:
             detecciones.setdefault(celda, []).append(det)
@@ -582,8 +600,6 @@ def resolver_web(url: str, headed: bool = False, salida: str = "",
 
     from captcha_ia import resolver
 
-    if detectar_lote is None:
-        detectar_lote = detectar_batch_worker
     if ocr_fallback is None:
         ocr_fallback = leer_instruccion_ocr
 
