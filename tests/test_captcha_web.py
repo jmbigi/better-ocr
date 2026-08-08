@@ -15,6 +15,7 @@ from captcha_web import (
     fallback_vlm_docbee,
     fallback_vlm_ollama,
     indice_a_fila_col,
+    listar_fallos,
     n_desde_tiles,
     parsear_respuesta_vlm,
     resolver_offline,
@@ -313,6 +314,28 @@ class TestFallbackVlmDocbee(unittest.TestCase):
 
     def test_sin_clase_no_pregunta(self):
         self.assertEqual(fallback_vlm_docbee([], None), {})
+
+
+class TestListarFallos(unittest.TestCase):
+    def test_resume_el_corpus(self):
+        import tempfile
+
+        d = tempfile.mkdtemp(prefix="fallos_")
+        with open(os.path.join(d, "caso_1_i1.json"), "w",
+                  encoding="utf-8") as f:
+            json.dump({"n": 3, "clase_objetivo": "car", "seleccion": [[0, 0]],
+                       "veredicto": "pendiente",
+                       "instruccion": "Select all images with\ncars",
+                       "captura": "reto_3x3_i1.png"}, f)
+        with open(os.path.join(d, "otro.txt"), "w") as f:
+            f.write("ignorado")
+        filas = listar_fallos(d)
+        self.assertEqual(len(filas), 1)
+        self.assertEqual(filas[0]["clase"], "car")
+        self.assertEqual(filas[0]["seleccion"], 1)
+        self.assertEqual(filas[0]["instruccion"],
+                         "Select all images with cars")
+        self.assertEqual(listar_fallos("/no/existe"), [])
 
 
 class TestUmbralObjetivo(unittest.TestCase):

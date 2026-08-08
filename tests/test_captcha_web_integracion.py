@@ -384,6 +384,38 @@ class TestOrquestadorLocal(unittest.TestCase):
         self.assertEqual(registro[0]["detecciones_por_celda"]["0,0"][0]["clase"],
                          "bus")
 
+    def test_fallo_guarda_corpus_analizable(self):
+        """Con --archivo-fallos, cada intento fallido queda como caso_*.json
+        (instruccion, decision, captura vinculada) para analisis avanzado."""
+        import tempfile
+        import captcha_web
+
+        Handler.clics = []
+        Handler.errores_antes_de_ok = 1  # el reto nunca llega a ok
+        self.addCleanup(setattr, Handler, "errores_antes_de_ok", 0)
+        url = f"http://127.0.0.1:{self.puerto}/"
+        salida = tempfile.mkdtemp(prefix="captcha_salida_")
+        fallos = tempfile.mkdtemp(prefix="captcha_fallos_")
+
+        def stub_detector(celdas_pil):
+            return {(0, 0): [{"clase": "bus", "score": 0.9}]}
+
+        res = captcha_web.resolver_web(url, detectar_lote=stub_detector,
+                                       timeout_s=60, max_intentos=1,
+                                       salida=salida,
+                                       archivo_fallos=fallos)
+        self.assertFalse(res["ok"], res)
+        casos = [n for n in os.listdir(fallos)
+                 if n.startswith("caso_") and n.endswith(".json")]
+        self.assertEqual(len(casos), 1)
+        with open(os.path.join(fallos, casos[0]), encoding="utf-8") as f:
+            caso = json.load(f)
+        self.assertEqual(caso["clase_objetivo"], "bus")
+        self.assertEqual(caso["captura"], "reto_3x3_i1.png")
+        filas = captcha_web.listar_fallos(fallos)
+        self.assertEqual(len(filas), 1)
+        self.assertEqual(filas[0]["clase"], "bus")
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -525,7 +525,7 @@ def resolver_web(url: str, headed: bool = False, salida: str = "",
                  timeout_s: float = 150.0, max_intentos: int = 3,
                  fallback_vlm=None, detectar_lote=None,
                  ocr_fallback=None, umbral_objetivo: float = None,
-                 vlm_recall: bool = False) -> dict:
+                 vlm_recall: bool = False, archivo_fallos: str = "") -> dict:
     """Ciclo completo real: checkbox -> reto -> instruccion -> tiles ->
     VERIFY/SKIP -> veredicto, con reintento tras re-render del reto.
 
@@ -685,6 +685,8 @@ def resolver_web(url: str, headed: bool = False, salida: str = "",
                 "clase_objetivo": res.get("clase_objetivo"),
                 "seleccion": sorted(res.get("seleccion", [])),
                 "descartadas": sorted(res.get("descartadas", [])),
+                "captura": (f"reto_{n}x{n}_i{intento}.png" if salida else ""),
+                "veredicto": resultado,
                 "inciertas": sorted(res.get("inciertas", [])),
                 "detecciones_por_celda": {
                     f"{f},{c}": detecciones.get((f, c), [])
@@ -714,6 +716,20 @@ def resolver_web(url: str, headed: bool = False, salida: str = "",
             # error o pendiente: el reto se re-renderiza; reintentar
 
         navegador.close()
+        # corpus de fallos (P0.1 + analisis avanzado): cada intento fallido
+        # queda como caso.json con la decision, los scores y la captura
+        # vinculada, para re-evaluar configuraciones sin nuevas ejecuciones
+        if archivo_fallos:
+            try:
+                os.makedirs(archivo_fallos, exist_ok=True)
+                marca = int(time.time())
+                for rec in registro:
+                    ruta = os.path.join(archivo_fallos,
+                                        f"caso_{marca}_i{rec['intento']}.json")
+                    with open(ruta, "w", encoding="utf-8") as f:
+                        json.dump(rec, f, ensure_ascii=False, indent=2)
+            except OSError:
+                pass
         return {"ok": False, "error": "sin exito tras varios intentos",
                 "veredicto": resultado or "pendiente",
                 "clase_objetivo": res.get("clase_objetivo"),
@@ -721,6 +737,33 @@ def resolver_web(url: str, headed: bool = False, salida: str = "",
                 "instruccion": instruccion,
                 "intento": max_intentos,
                 "tiempo_s": round(time.monotonic() - t_inicio, 1)}
+
+
+def listar_fallos(directorio: str) -> list:
+    """Resumen del corpus de fallos (caso_*.json): filas para analisis
+    avanzado — clase, n, seleccion, tamano de seleccion, veredicto e
+    instruccion de cada intento guardado."""
+    filas = []
+    if not os.path.isdir(directorio):
+        return filas
+    for nombre in sorted(os.listdir(directorio)):
+        if not nombre.startswith("caso_") or not nombre.endswith(".json"):
+            continue
+        try:
+            with open(os.path.join(directorio, nombre), encoding="utf-8") as f:
+                caso = json.load(f)
+        except (OSError, json.JSONDecodeError):
+            continue
+        filas.append({
+            "archivo": nombre,
+            "n": caso.get("n"),
+            "clase": caso.get("clase_objetivo"),
+            "seleccion": len(caso.get("seleccion", [])),
+            "veredicto": caso.get("veredicto"),
+            "instruccion": caso.get("instruccion", "").replace("\n", " "),
+            "captura": caso.get("captura", ""),
+        })
+    return filas
 
 
 def _aplicar_fallback_vlm(detecciones: dict, celdas_pil: list, clase: str,
@@ -854,7 +897,23 @@ def main() -> None:
                              "correlacionan con rechazos (5 ok vs 7 fallos); "
                              "la confirmacion de candidatos se mantiene "
                              "siempre con --vlm-fallback")
+    parser.add_argument("--archivo-fallos", default="",
+                        help="directorio del corpus de fallos: cada intento "
+                             "fallido de una ejecucion sin exito se guarda "
+                             "como caso_<ts>_i<N>.json (instruccion, decision, "
+                             "scores por celda y captura vinculada) para "
+                             "analisis avanzado sin nuevas ejecuciones")
+    parser.add_argument("--listar-fallos", metavar="DIR",
+                        help="resume el corpus de fallos (caso_*.json) de DIR "
+                             "en una tabla: clase, n, seleccion, veredicto")
     args = parser.parse_args()
+
+    if args.listar_fallos:
+        for fila in listar_fallos(args.listar_fallos):
+            print(f"{fila['archivo']:<24} n={fila['n']} "
+                  f"{str(fila['clase']):<16} sel={fila['seleccion']} "
+                  f"{fila['veredicto']:<10} {fila['instruccion'][:40]}")
+        return
 
     if args.offline:
         if not args.n or not args.instruccion:
@@ -889,7 +948,8 @@ def main() -> None:
                              max_intentos=args.max_intentos,
                              umbral_objetivo=args.umbral_objetivo,
                              fallback_vlm=fallback_vlm,
-                             vlm_recall=args.vlm_recall)
+                             vlm_recall=args.vlm_recall,
+                             archivo_fallos=args.archivo_fallos)
     print(json.dumps(resultado, ensure_ascii=False, indent=2))
 
 
