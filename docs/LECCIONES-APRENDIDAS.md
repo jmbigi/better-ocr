@@ -287,3 +287,39 @@
 4. **Umbral adaptativo** (0.45 en 3×3): los cars del reto puntuaban 0.67-0.90, holgadamente sobre el umbral.
 
 **Lección:** los fallos en vivo encadenados ("sin éxito" tras "sin éxito") no se resolvieron tocando la precisión del detector — se resolvieron con **evidencia del DOM real** (archivos guardados por el programador) que destapó bugs de selectores y parser. El orden de ataque correcto en automatización de widgets de terceros: 1) capturar y validar el DOM real, 2) arreglar selectores/parser, 3) recién entonces medir precisión del detector. Y los `--salida`/`intentos.json` fueron la infraestructura que lo hizo analizable (P0.1).
+
+## 22. Un default silencioso dejó MUERTO el modo nuevo: "los tests pasan" no prueba que el código corra (2026-08-07)
+
+**Fallo:** se implementó la detección sobre la imagen completa del reto y se "validó" con un batch en vivo (g, 0/6)... sin darse cuenta de que `if detectar_lote is None: detectar_lote = detectar_batch_worker` (default del diseño original, dentro de `resolver_web`) hacía que el check del modo nuevo fuese **código muerto**: TODOS los runs usaron siempre el worker por-celdas. Se descubrió por la contradicción offline vs en vivo: el mismo `detectar_cuadricula_worker` crasheaba con `ModuleNotFoundError: paddlex` en el offline (python del sistema) pero "funcionaba" en el en vivo (porque en realidad nunca se llamaba).
+
+**Solución:** quitar el default silencioso; el modo imagen-completa corre en subproceso del venv (WORKER_GRID) y funciona desde el python del sistema. Batch h tras el fix: 4/6 ok, 10 s/run (3× más rápido).
+
+**Lección:** tras un cambio de comportamiento, verificar que el código nuevo se EJECUTA de verdad (probe, contador, o contraste entre dos caminos que deberían diferir) — los tests verdes y los runs "exitosos" solo prueban que ALGO funciona; un default silencioso puede anular una mejora completa sin error aparente.
+
+## 23. La detección sobre la imagen completa gana al recorte por celdas (2026-08-07)
+
+**Hallazgo:** recortar la cuadrícula en celdas de ~120 px y detectar por separado pierde el contexto de la escena; RT-DETR sobre la imagen COMPLETA (bboxes mapeados a celdas por el centro) recupera objetos pequeños que el recorte pierde. Evidencia: corpus de 58 fallos, selecciones plausibles 22 → 26; 7 casos de sub-selección recuperaron objetos (car 1→3, bus 0→2); batch h en vivo 4/6 ok a 10 s/run.
+
+**Lección:** en detección de objetos pequeños, primero probar el cambio de ventana de detección (completa vs recortada) antes de cambiar de modelo o descargar nada — es gratis y a veces resuelve el recall.
+
+## 24. Resultados negativos medidos del stack: upscale, VLM y config (2026-08-07)
+
+**Campaña de 41 runs en vivo + replay del corpus (58 fallos con capturas):**
+1. **Upscale 3× no recupera objetos**: detecciones idénticas a 2× en 9 casos — el límite es el modelo, no la resolución interpolada.
+2. **Ningún VLM de confirmación mejora el baseline**: solo RT-DETR 23/58 plausibles vs +docbee 21, +gemma3:4b 22, +qwen2.5vl:7b 19 (el 7b es el más agresivo descartando — peor en este corpus). La confirmación solo QUITA candidatos: no puede arreglar la sub-selección.
+3. **La pasada de ADICIÓN del VLM sobre-agrega**: celdas añadidas por el VLM correlacionan con rechazos (5 ok vs 7 fallos) — consistente con la lección 20 (sobre-selección). Quedó opt-in (`--vlm-recall`).
+4. **La tasa ~50-60% es independiente de la config**: RT-DETR solo 57%, VLM con recall 59%, VLM conservador 50% — la config cambia el MODO de fallo (no-COCO, sub-detección, sobre-adición), no la tasa. El cuello de botella es el recall del detector en objetos pequeños.
+
+**Lección:** ante una tasa estancada, medir sistemáticamente cada palanca sobre un corpus guardado (replay) antes de seguir invirtiendo — los resultados negativos acotan el problema y evitan "mejoras" que solo mueven el modo de fallo.
+
+## 25. El corpus de fallos como infraestructura de análisis (2026-08-07)
+
+**Herramienta:** `--archivo-fallos DIR` guarda cada intento fallido como `caso_<ts>_i<N>.json` (instrucción, decisión, scores por celda, captura vinculada); `--listar-fallos DIR` resume el corpus; `scripts/replay_fallos.py` re-evalúa los casos con distintas configuraciones (umbral, VLM docbee/gemma/qwen, recall) **sin ejecuciones en vivo**. El corpus actual: 58 casos con capturas en `/var/tmp/captcha_fallos/`.
+
+**Lección:** guardar los fallos con su captura y decisiones transforma cada campaña en un dataset re-evaluable — es la infraestructura que permitió comparar 3 modelos y 4 configs sin gastar más ejecuciones, y la que evaluará RT-DETR-H con el mismo método.
+
+## 26. El dict final de un run puede mentir: leer los intentos (2026-08-07)
+
+**Fallo (2 veces):** los resúmenes de los batches mostraban `clase: None` y `sel: 0` para runs que en `intentos.json` tenían clases y selecciones reales — el dict final de fallo no incluía esas claves (`r.get(...)` devolvía None/[]) y parecía que "no se había seleccionado nada" cuando sí. Corregido: el dict de fallo incluye `clase_objetivo` y `seleccion`.
+
+**Lección:** el dict resumido es solo una puerta de entrada; la verdad está en `intentos.json` — antes de concluir sobre un run fallido, leer los intentos guardados.
