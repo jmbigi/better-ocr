@@ -442,7 +442,7 @@ def resolver_web(url: str, headed: bool = False, salida: str = "",
                  timeout_s: float = 150.0, max_intentos: int = 3,
                  fallback_vlm=None, detectar_lote=None,
                  ocr_fallback=None, umbral_objetivo: float = None,
-                 vlm_recall: bool = True) -> dict:
+                 vlm_recall: bool = False) -> dict:
     """Ciclo completo real: checkbox -> reto -> instruccion -> tiles ->
     VERIFY/SKIP -> veredicto, con reintento tras re-render del reto.
 
@@ -666,11 +666,12 @@ def _aplicar_fallback_vlm(detecciones: dict, celdas_pil: list, clase: str,
     inciertas = [(f, c, celda) for (f, c, celda) in celdas_pil
                  if not detecciones.get((f, c), [])]
     if not candidatas:
-        # Sin candidatos del objetivo: el VLM cubre TODAS las celdas — la
-        # clase puede ser no-COCO con otras detecciones presentes (medido en
-        # vivo: 'mountains or hills' con bicycles/cars detectados); devolver
-        # sin preguntar dejaba seleccion vacia y VERIFY ignorado en silencio.
-        # Se FUSIONA con las detecciones del worker (no se reemplazan).
+        # Sin candidatos del objetivo: con recall=True el VLM cubre TODAS
+        # las celdas (clases no-COCO); con recall=False (default) no se
+        # anade nada — devolver sin preguntar. La cobertura total demostro
+        # sobre-seleccion en vivo (p4-i1: 6 celdas VLM rechazadas).
+        if not recall:
+            return detecciones
         encontradas = fallback_vlm(celdas_pil, clase) or {}
         for (f, c), dets in encontradas.items():
             detecciones.setdefault((f, c), []).extend(dets)
@@ -692,7 +693,7 @@ def _aplicar_fallback_vlm(detecciones: dict, celdas_pil: list, clase: str,
 
 def resolver_offline(imagen_ruta: str, n: int, instruccion: str,
                      umbral_objetivo: float = None,
-                     fallback_vlm=None, vlm_recall: bool = True) -> dict:
+                     fallback_vlm=None, vlm_recall: bool = False) -> dict:
     """Pipeline completo SIN navegador sobre una cuadricula guardada (pasada
     por celda offline): celdas + RT-DETR batch (una carga) + decision.
 
@@ -758,10 +759,14 @@ def main() -> None:
                              "demanda; pregunta binaria por celda)")
     parser.add_argument("--vlm-modelo", default="gemma3:4b",
                         help="modelo ollama para --vlm-fallback")
-    parser.add_argument("--sin-vlm-recall", action="store_true",
-                        help="desactiva la pasada de recall del VLM (celdas "
-                             "sin deteccion): ayuda en clases dificiles pero "
-                             "sobre-agrega en comunes (cars, medido en vivo)")
+    parser.add_argument("--vlm-recall", action="store_true",
+                        help="habilita la pasada de ADICION del VLM (recall "
+                             "sobre celdas sin deteccion + cobertura de "
+                             "clases no-COCO). Default OFF: datos en vivo "
+                             "(23+ runs) muestran que las celdas VLM anadidas "
+                             "correlacionan con rechazos (5 ok vs 7 fallos); "
+                             "la confirmacion de candidatos se mantiene "
+                             "siempre con --vlm-fallback")
     args = parser.parse_args()
 
     if args.offline:
@@ -776,7 +781,7 @@ def main() -> None:
         resultado = resolver_offline(
             args.offline, args.n, args.instruccion,
             umbral_objetivo=args.umbral_objetivo, fallback_vlm=fallback_vlm,
-            vlm_recall=not args.sin_vlm_recall)
+            vlm_recall=args.vlm_recall)
         print(json.dumps(resultado, ensure_ascii=False, indent=2))
         return
     if not args.url:
@@ -793,7 +798,7 @@ def main() -> None:
                              max_intentos=args.max_intentos,
                              umbral_objetivo=args.umbral_objetivo,
                              fallback_vlm=fallback_vlm,
-                             vlm_recall=not args.sin_vlm_recall)
+                             vlm_recall=args.vlm_recall)
     print(json.dumps(resultado, ensure_ascii=False, indent=2))
 
 

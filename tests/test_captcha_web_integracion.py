@@ -265,7 +265,8 @@ class TestOrquestadorLocal(unittest.TestCase):
             return {(1, 1): [{"clase": clase, "score": 1.0}]}
 
         res = captcha_web.resolver_web(url, detectar_lote=stub_detector,
-                                       fallback_vlm=stub_vlm, timeout_s=60)
+                                       fallback_vlm=stub_vlm, timeout_s=60,
+                                       vlm_recall=True)
         self.assertTrue(res["ok"], res)
         self.assertEqual(res["veredicto"], "ok")
         self.assertEqual(llamadas, ["crosswalk"])
@@ -295,7 +296,8 @@ class TestOrquestadorLocal(unittest.TestCase):
             return {(0, 1): [{"clase": "bus", "score": 1.0}]}
 
         res = captcha_web.resolver_web(url, detectar_lote=stub_detector,
-                                       fallback_vlm=stub_vlm, timeout_s=60)
+                                       fallback_vlm=stub_vlm, timeout_s=60,
+                                       vlm_recall=True)
         self.assertTrue(res["ok"], res)
         self.assertEqual(res["veredicto"], "ok")
         # llamada 1: candidatos; llamada 2: celdas sin deteccion (recall)

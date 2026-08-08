@@ -140,10 +140,9 @@ class TestAplicarFallbackVLM(unittest.TestCase):
         self.assertEqual(recibidas, [9])
         self.assertEqual(res[(1, 1)][0]["clase"], "crosswalk")
 
-    def test_detecciones_de_otras_clases_si_llama_al_vlm(self):
-        # 'mountains or hills' con bicycles/cars detectados (medido en vivo
-        # 2026-08-07): sin candidatos del objetivo, el VLM cubre TODAS las
-        # celdas (la clase puede ser no-COCO entre detecciones COCO)
+    def test_sin_candidatos_con_recall_cubre_todas(self):
+        # con --vlm-recall: sin candidatos del objetivo, el VLM cubre TODAS
+        # las celdas (clases no-COCO) y fusiona
         det = {(0, 0): [{"clase": "bicycle", "score": 0.8}]}
         recibidas = []
 
@@ -152,10 +151,20 @@ class TestAplicarFallbackVLM(unittest.TestCase):
             return {(1, 1): [{"clase": "mountains or hills", "score": 1.0}]}
 
         res = _aplicar_fallback_vlm(det, self._celdas(), "mountains or hills",
-                                    0.45, vlm)
+                                    0.45, vlm, recall=True)
         self.assertEqual(recibidas, [("mountains or hills", 9)])
         self.assertEqual(res[(1, 1)][0]["clase"], "mountains or hills")
         self.assertEqual(res[(0, 0)][0]["clase"], "bicycle")  # se conserva
+
+    def test_sin_candidatos_sin_recall_no_anade_nada(self):
+        # default conservador (recall OFF): sin candidatos del objetivo, el
+        # VLM NO cubre las celdas (evita la sobre-seleccion medida en vivo)
+        det = {(0, 0): [{"clase": "bicycle", "score": 0.8}]}
+        res = _aplicar_fallback_vlm(
+            det, self._celdas(), "mountains or hills", 0.45,
+            lambda celdas, clase: (_ for _ in ()).throw(
+                AssertionError("no debe llamarse")), recall=False)
+        self.assertEqual(res, det)
 
     def test_sin_fallback_no_cambia_nada(self):
         det = {(0, 1): [{"clase": "bus", "score": 0.9}]}
@@ -216,7 +225,8 @@ class TestResolverOffline(unittest.TestCase):
                         return_value={}):
             res = resolver_offline(
                 self._ruta_grid(), n=3,
-                instruccion="select all crosswalks", fallback_vlm=vlm)
+                instruccion="select all crosswalks", fallback_vlm=vlm,
+                vlm_recall=True)
         self.assertTrue(res["ok"], res)
         self.assertEqual(llamadas, ["crosswalk"])
         self.assertEqual(sorted(res["seleccion"]), [(0, 1)])
