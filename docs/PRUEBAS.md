@@ -117,8 +117,9 @@ Total: 65 tests nuevos (suite completa 133/133 OK).
 | **Corpus real del parser** | las 12 instrucciones únicas vistas en los 17 runs en vivo quedan como test de regresión (cars, bus, motorcycles, bicycles, traffic lights, crosswalks, fire hydrant, mountains or hills, variantes "If there are none, click skip" y "Click verify once there are none left") + variante con salto de línea del DOM | 1 test (13 aserciones) |
 | **Batch t1-t6 (6/6 ok con VLM)** | 2026-08-07, 6 ejecuciones seguidas con `--vlm-fallback` TODAS resueltas: motorcycle 4×4 (3 celdas VLM correctas), bicycle ×2, bus, traffic light ×2 (2 celdas VLM correctas). Agregado con VLM: 11/16 (68.75%); total 23 runs, 15 ok (65.2%) | intentos.json t1-t6 |
 | **Política de recall por clase (datos en vivo)** | 23 runs analizados: en `car` 2/2 fallos coincidieron con una celda VLM añadida en celda vacía (v4/v8) y las 3 victorias fueron sin celdas VLM → `SIN_RECALL_CLASES={"car"}` (recall excluido, confirmación de candidatos intacta); en motorcycle/bicycle/traffic light las celdas VLM fueron correctas (t1/t4/t6). Sigue disponible `--sin-vlm-recall` global | 1 test (137/137) |
+| **Default conservador: adición VLM opt-in** | batch p1-p6 (2/6): la sobre-selección del VLM se confirma en VARIAS clases — p2-i3 traffic light (5 celdas VLM → rechazo), p4-i1 crosswalk no-COCO (6 celdas VLM → rechazo), p4-i2 fire hydrant (5 → rechazo), p6-i1 motorcycle (2 → rechazo). Agregado con celdas VLM: **5 ok vs 7 fallos** → la pasada de ADICIÓN (recall + cobertura no-COCO) pasa a **opt-in (`--vlm-recall`)**; la confirmación de candidatos (solo descarta) se mantiene siempre con `--vlm-fallback`. `SIN_RECALL_CLASES={"car"}` sigue activa cuando `--vlm-recall` está encendido | 29 runs acumulados; 2 tests nuevos (138/138) |
 
-Total: 71 tests nuevos (suite completa 137/137 OK).
+Total: 72 tests nuevos (suite completa 138/138 OK).
 
 Pendientes (requieren ejecución en vivo o VLM libre):
 - Validación real contra la demo oficial de Google
