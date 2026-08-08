@@ -323,3 +323,11 @@
 **Fallo (2 veces):** los resúmenes de los batches mostraban `clase: None` y `sel: 0` para runs que en `intentos.json` tenían clases y selecciones reales — el dict final de fallo no incluía esas claves (`r.get(...)` devolvía None/[]) y parecía que "no se había seleccionado nada" cuando sí. Corregido: el dict de fallo incluye `clase_objetivo` y `seleccion`.
 
 **Lección:** el dict resumido es solo una puerta de entrada; la verdad está en `intentos.json` — antes de concluir sobre un run fallido, leer los intentos guardados.
+
+## 27. Un detector mayor (RT-DETR-H) mejora el corpus pero NO la tasa en vivo (2026-08-07)
+
+**Experimento:** RT-DETR-H vs RT-DETR-L (detección imagen-completa, lección 23). En el corpus de 58 fallos, H mejora las selecciones "plausibles" (tamaño típico por clase): 26 → 32, y resolvió el primer fire hydrant en vivo. Pero la tasa en vivo agregada: **L 4/6 vs H 3/14** — H NO mejora (y fue más lento: ~81 s vs ~68 s por fallo, 2 runs crasheados).
+
+**Explicación probable:** la métrica del corpus (tamaño de selección cercano al típico) NO mide la CORRECCIÓN de las celdas — H selecciona más celdas con tamaños plausibles pero con más celdas erróneas, lo que aumenta los rechazos. El adversario castiga el exceso de selección tanto como la falta.
+
+**Lección:** la mejora de recall de un detector debe validarse por TASA EN VIVO, no por métricas de tamaño sobre un corpus — y el default se queda con el modelo que la mide mejor (L). La lección 24 se refuerza: cambiar el detector mueve los modos de fallo, no la tasa (~50-60%).
