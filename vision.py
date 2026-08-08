@@ -214,17 +214,21 @@ def modo_objetos(imagen: str, solo_personas: bool) -> dict:
     return {"ok": True, "detecciones": _parsear_detecciones(res[0].json, solo_personas)}
 
 
-def modo_objetos_lote(rutas: list) -> dict:
+def modo_objetos_lote(rutas: list, modelo: str = "RT-DETR-L") -> dict:
     """RT-DETR sobre varias imagenes con UNA sola carga del modelo
     (create_model NO cachea: cargarlo por imagen multiplica el tiempo por N
-    y revienta los timeouts — hallazgo en captcha_web, 2026-08-07)."""
+    y revienta los timeouts — hallazgo en captcha_web, 2026-08-07).
+
+    `modelo`: nombre del detector PaddleX (RT-DETR-L por defecto;
+    RT-DETR-H mejora el recall de objetos pequenos — corpus de fallos
+    2026-08-07: plausibles 26 -> 32)."""
     os.environ["PADDLE_PDX_ENABLE_MKLDNN_BYDEFAULT"] = "0"
     from paddlex import create_model  # import perezoso
-    modelo = create_model("RT-DETR-L")
+    modelo_obj = create_model(modelo)
     salida = {}
     for ruta in rutas:
         try:
-            res = list(modelo.predict(ruta))
+            res = list(modelo_obj.predict(ruta))
             salida[ruta] = (_parsear_detecciones(res[0].json, False)
                             if res else [])
         except Exception:

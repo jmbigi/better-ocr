@@ -356,33 +356,35 @@ def celda_de_bbox(bbox: list, n: int, ancho: float, alto: float):
 # por celda, medido en el corpus 2026-08-07): RT-DETR sobre la cuadricula
 # entera, bboxes mapeados a celdas por el centro (celda_de_bbox). Corre en
 # el venv por subproceso con CPU forzada (leccion 18) para funcionar desde
-# el python del sistema.
+# el python del sistema. El detector se pasa como argv[2] (RT-DETR-L/H).
 WORKER_GRID = r"""
 import json, os, sys
 sys.path.insert(0, %(raiz)r)
 os.environ.setdefault("TMPDIR", "/var/tmp")
 os.environ["CUDA_VISIBLE_DEVICES"] = ""
 from vision import modo_objetos_lote
-ruta = sys.argv[1]
-json.dump(modo_objetos_lote([ruta]), sys.stdout)
+ruta, modelo = sys.argv[1], sys.argv[2]
+json.dump(modo_objetos_lote([ruta], modelo=modelo), sys.stdout)
 """
 
 
-def detectar_cuadricula_worker(imagen, n: int) -> dict:
+def detectar_cuadricula_worker(imagen, n: int,
+                              modelo: str = "RT-DETR-L") -> dict:
     """Deteccion RT-DETR sobre la imagen COMPLETA del reto, mapeada a celdas
     por el centro del bbox. Subproceso del venv (WORKER_GRID), una sola
     carga del modelo, CPU forzada.
 
     Mejor recall que la deteccion por celda (las celdas recortadas pierden
-    el contexto de la escena): corpus de 58 fallos, plausibles 22 -> 26.
+    el contexto de la escena): corpus de 58 fallos, plausibles 22 -> 26 con
+    RT-DETR-L y 32 con RT-DETR-H (objetos pequenos).
     """
     with tempfile.TemporaryDirectory(prefix="captcha_grid_") as directorio:
         ruta = os.path.join(directorio, "cuadricula.png")
         imagen.save(ruta)
         script = WORKER_GRID % {"raiz": os.path.dirname(os.path.abspath(__file__))}
         proc = subprocess.run(
-            [VENV_PYTHON, "-c", script, ruta],
-            capture_output=True, text=True, timeout=300)
+            [VENV_PYTHON, "-c", script, ruta, modelo],
+            capture_output=True, text=True, timeout=600)
         if proc.returncode != 0:
             return {}
         salida = json.loads(proc.stdout)
@@ -587,7 +589,8 @@ def resolver_web(url: str, headed: bool = False, salida: str = "",
                  timeout_s: float = 150.0, max_intentos: int = 3,
                  fallback_vlm=None, detectar_lote=None,
                  ocr_fallback=None, umbral_objetivo: float = None,
-                 vlm_recall: bool = False, archivo_fallos: str = "") -> dict:
+                 vlm_recall: bool = False, archivo_fallos: str = "",
+                 modelo_detector: str = "RT-DETR-L") -> dict:
     """Ciclo completo real: checkbox -> reto -> instruccion -> tiles ->
     VERIFY/SKIP -> veredicto, con reintento tras re-render del reto.
 
@@ -694,7 +697,8 @@ def resolver_web(url: str, headed: bool = False, salida: str = "",
             celdas_pil = [(f, c, aumentar_escala(celda))
                           for f, c, celda in celdas_grid(imagen, n=n)]
             if detectar_lote is None:
-                detecciones = detectar_cuadricula_worker(imagen, n)
+                detecciones = detectar_cuadricula_worker(imagen, n,
+                                              modelo=modelo_detector)
             else:
                 detecciones = detectar_lote(celdas_pil)
             es_variante_none = "skip" in instruccion.lower()
@@ -883,7 +887,8 @@ def _aplicar_fallback_vlm(detecciones: dict, celdas_pil: list, clase: str,
 
 def resolver_offline(imagen_ruta: str, n: int, instruccion: str,
                      umbral_objetivo: float = None,
-                     fallback_vlm=None, vlm_recall: bool = False) -> dict:
+                     fallback_vlm=None, vlm_recall: bool = False,
+                     modelo_detector: str = "RT-DETR-L") -> dict:
     """Pipeline completo SIN navegador sobre una cuadricula guardada (pasada
     por celda offline): celdas + RT-DETR batch (una carga) + decision.
 
@@ -900,7 +905,8 @@ def resolver_offline(imagen_ruta: str, n: int, instruccion: str,
     imagen = Image.open(imagen_ruta)
     celdas_pil = [(f, c, aumentar_escala(celda))
                   for f, c, celda in celdas_grid(imagen, n=n)]
-    detecciones = detectar_cuadricula_worker(imagen, n)
+    detecciones = detectar_cuadricula_worker(imagen, n,
+                                modelo=modelo_detector)
     if fallback_vlm is not None:
         clase = parsear_instruccion(instruccion)
         detecciones = _aplicar_fallback_vlm(detecciones, celdas_pil, clase,
@@ -961,6 +967,11 @@ def main() -> None:
                              "correlacionan con rechazos (5 ok vs 7 fallos); "
                              "la confirmacion de candidatos se mantiene "
                              "siempre con --vlm-fallback")
+    parser.add_argument("--modelo-detector", default="RT-DETR-L",
+                        choices=("RT-DETR-L", "RT-DETR-H"),
+                        help="detector PaddleX: RT-DETR-H mejora el recall "
+                             "de objetos pequenos (corpus: plausibles 26 -> "
+                             "32) a costa de ~2.5x mas tiempo")
     parser.add_argument("--archivo-fallos", default="",
                         help="directorio del corpus de fallos: cada intento "
                              "fallido de una ejecucion sin exito se guarda "
@@ -993,7 +1004,8 @@ def main() -> None:
         resultado = resolver_offline(
             args.offline, args.n, args.instruccion,
             umbral_objetivo=args.umbral_objetivo, fallback_vlm=fallback_vlm,
-            vlm_recall=args.vlm_recall)
+            vlm_recall=args.vlm_recall,
+            modelo_detector=args.modelo_detector)
         print(json.dumps(resultado, ensure_ascii=False, indent=2))
         return
     if not args.url:
@@ -1013,7 +1025,8 @@ def main() -> None:
                              umbral_objetivo=args.umbral_objetivo,
                              fallback_vlm=fallback_vlm,
                              vlm_recall=args.vlm_recall,
-                             archivo_fallos=args.archivo_fallos)
+                             archivo_fallos=args.archivo_fallos,
+                             modelo_detector=args.modelo_detector)
     print(json.dumps(resultado, ensure_ascii=False, indent=2))
 
 
