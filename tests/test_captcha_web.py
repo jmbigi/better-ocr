@@ -12,6 +12,7 @@ import captcha_web
 
 from captcha_web import (
     _aplicar_fallback_vlm,
+    fallback_vlm_docbee,
     fallback_vlm_ollama,
     indice_a_fila_col,
     n_desde_tiles,
@@ -273,6 +274,45 @@ class TestPreguntarOllama(unittest.TestCase):
         import io
         self.assertEqual(
             Image.open(io.BytesIO(b64mod.b64decode(b64))).size, (20, 20))
+
+
+class TestFallbackVlmDocbee(unittest.TestCase):
+    def _celdas(self, n=3):
+        from PIL import Image
+        return [(f, c, Image.new("RGB", (30, 30)))
+                for f in range(n) for c in range(n)]
+
+    def test_respuestas_si_se_mapean_por_celda(self):
+        # subprocess simulado: docbee responde Yes/No por ruta
+        salida = {
+            "/tmp/f0c0.png": "Yes.",
+            "/tmp/f0c1.png": "No.",
+            "/tmp/f0c2.png": "cannot tell",
+        }
+        falso = mock.Mock(returncode=0, stdout=json.dumps(salida))
+
+        with mock.patch("captcha_web.subprocess.run",
+                        return_value=falso) as run_mock, \
+                mock.patch("captcha_web.tempfile.mkdtemp",
+                           return_value="/tmp"):
+            res = fallback_vlm_docbee(self._celdas()[:3], "crosswalk")
+        self.assertEqual(list(res.keys()), [(0, 0)])
+        self.assertEqual(res[(0, 0)][0]["clase"], "crosswalk")
+        # el worker recibe rutas + clase y el env de la leccion 17
+        args, kwargs = run_mock.call_args
+        self.assertIn("crosswalk", kwargs["input"])
+        self.assertIn("LD_LIBRARY_PATH", kwargs["env"])
+
+    def test_fallo_del_worker_devuelve_vacio(self):
+        falso = mock.Mock(returncode=1, stdout="")
+        with mock.patch("captcha_web.subprocess.run", return_value=falso), \
+                mock.patch("captcha_web.tempfile.mkdtemp",
+                           return_value="/tmp"):
+            res = fallback_vlm_docbee(self._celdas()[:2], "crosswalk")
+        self.assertEqual(res, {})
+
+    def test_sin_clase_no_pregunta(self):
+        self.assertEqual(fallback_vlm_docbee([], None), {})
 
 
 class TestUmbralObjetivo(unittest.TestCase):

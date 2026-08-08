@@ -152,11 +152,6 @@ def _preguntar_ollama(imagen_pil, clase: str, host: str, modelo: str,
 def fallback_vlm_ollama(celdas_pil: list, clase_objetivo: str = None,
                         host: str = "127.0.0.1", modelo: str = "gemma3:4b",
                         timeout_s: float = 90.0) -> dict:
-    """Re-evalua las celdas con un VLM local (ollama). Pregunta binaria por
-    celda — mas acotada que 'select all tiles with X', que sobre-selecciona
-    (leccion 20). Devuelve {(fila, col): [{"clase", "score": 1.0}]} para las
-    celdas con respuesta 'si'; las demas quedan vacias (el decisor las
-    trata como inciertas). Sin clase_objetivo no se puede preguntar: {}."""
     if not clase_objetivo or not celdas_pil:
         return {}
     if not _garantizar_ollama(host):
@@ -172,6 +167,94 @@ def fallback_vlm_ollama(celdas_pil: list, clase_objetivo: str = None,
         except Exception:
             continue  # celda fallida: queda incierta
     return resultado
+
+
+# Parche GPU de docbee (leccion 17): paddle.cumsum promueve int32 -> int64 y
+# flash_attn_unpadded exige int32; max_pixels 0.5M para caber en 8 GB VRAM.
+PATCH_DOCBEE = """
+from paddlex.inference.models.doc_vlm.modeling import qwen2_vl as _qm
+_orig_unpad = _qm._get_unpad_data
+def _fix_unpad(mask):
+    indices, cu, mx = _orig_unpad(mask)
+    return indices, cu.astype('int32'), mx
+_qm._get_unpad_data = _fix_unpad
+from paddlex.inference.models.doc_vlm.processors import qwen2_vl as _pq
+_pq.MAX_PIXELS = 262144
+"""
+
+# Worker docbee: una sola carga del modelo, pregunta binaria por celda.
+WORKER_DOCBEE = r"""
+import json, sys
+sys.path.insert(0, %(raiz)r)
+%(patch)s
+from paddleocr import DocVLM
+modelo = DocVLM(model_name="PP-DocBee-2B", device="gpu")
+preguntas = json.load(sys.stdin)
+out = {}
+for ruta, clase in preguntas:
+    try:
+        res = modelo.predict({"image": ruta,
+                              "query": f"Does this image contain {clase}? "
+                                       "Answer only yes or no."})
+        texto = ""
+        for x in res:
+            texto += (x.json.get("res", {}).get("result") or "") + " "
+        out[ruta] = texto.strip()
+    except Exception:
+        out[ruta] = ""
+json.dump(out, sys.stdout)
+"""
+
+
+def fallback_vlm_docbee(celdas_pil: list, clase_objetivo: str = None,
+                        timeout_s: float = 600.0) -> dict:
+    """Re-evalua las celdas con docbee (PP-DocBee-2B) en GPU: subproceso del
+    venv con el env de la leccion 17 (env_worker), una sola carga del modelo.
+
+    MEDIDO EN VIVO (2026-08-07, tiles reales): docbee es mas conservador que
+    gemma3:4b y coincide con RT-DETR — traffic light 4x4: docbee dijo SI a
+    las 2 celdas de RT-DETR (gemma dijo SI a 5 sin solapamiento); crosswalk:
+    gemma sobre-selecciono 2 celdas segun docbee. Mejor modelo de
+    confirmacion que gemma para la pregunta binaria."""
+    if not clase_objetivo or not celdas_pil:
+        return {}
+    rutas = {}
+    directorio = tempfile.mkdtemp(prefix="captcha_docbee_")
+    try:
+        for fila, col, imagen in celdas_pil:
+            ruta = os.path.join(directorio, f"f{fila}c{col}.png")
+            imagen.save(ruta)
+            rutas[(fila, col)] = ruta
+        script = WORKER_DOCBEE % {
+            "raiz": os.path.dirname(os.path.abspath(__file__)),
+            "patch": PATCH_DOCBEE,
+        }
+        proc = subprocess.run(
+            [VENV_PYTHON, "-c", script],
+            input=json.dumps([(r, clase_objetivo) for r in rutas.values()]),
+            capture_output=True, text=True, timeout=timeout_s,
+            env=env_worker())
+        if proc.returncode != 0:
+            return {}
+        salida = json.loads(proc.stdout)
+        resultado = {}
+        for (fila, col), ruta in rutas.items():
+            if parsear_respuesta_vlm(salida.get(ruta, "")) is True:
+                resultado[(fila, col)] = [{"clase": clase_objetivo,
+                                           "score": 1.0}]
+        return resultado
+    except (json.JSONDecodeError, subprocess.TimeoutExpired):
+        return {}
+    finally:
+        for ruta in rutas.values():
+            try:
+                os.unlink(ruta)
+            except OSError:
+                pass
+        try:
+            os.rmdir(directorio)
+        except OSError:
+            pass
 
 VENV_PYTHON = os.path.join(os.path.dirname(os.path.abspath(__file__)),
                            ".venv", "bin", "python")
@@ -753,12 +836,16 @@ def main() -> None:
     parser.add_argument("--umbral-objetivo", type=float, default=None,
                         help="umbral de la clase objetivo (default por tamano: "
                              "0.45 en 3x3, 0.30 en 4x4; leccion 20 hallazgo 4)")
-    parser.add_argument("--vlm-fallback", action="store_true",
-                        help="celdas sin deteccion COCO re-evaluadas por un "
-                             "VLM local (ollama gemma3:4b, arrancado bajo "
-                             "demanda; pregunta binaria por celda)")
+    parser.add_argument("--vlm-fallback", nargs="?", const="ollama",
+                        choices=("docbee", "ollama"), default=None,
+                        help="VLM de confirmacion/cobertura: 'ollama' "
+                             "(gemma3:4b, arrancado bajo demanda; default) o "
+                             "'docbee' (PP-DocBee-2B en GPU, env leccion 17 — "
+                             "mas conservador y concordante con RT-DETR, "
+                             "medido en vivo 2026-08-07). Pregunta binaria "
+                             "por celda")
     parser.add_argument("--vlm-modelo", default="gemma3:4b",
-                        help="modelo ollama para --vlm-fallback")
+                        help="modelo ollama para --vlm-fallback ollama")
     parser.add_argument("--vlm-recall", action="store_true",
                         help="habilita la pasada de ADICION del VLM (recall "
                              "sobre celdas sin deteccion + cobertura de "
@@ -772,10 +859,12 @@ def main() -> None:
     if args.offline:
         if not args.n or not args.instruccion:
             parser.error("--offline requiere --n y --instruccion")
-        if args.vlm_fallback:
+        if args.vlm_fallback == "ollama":
             import functools
             fallback_vlm = functools.partial(fallback_vlm_ollama,
                                              modelo=args.vlm_modelo)
+        elif args.vlm_fallback == "docbee":
+            fallback_vlm = fallback_vlm_docbee
         else:
             fallback_vlm = None
         resultado = resolver_offline(
@@ -787,10 +876,12 @@ def main() -> None:
     if not args.url:
         parser.error("se requiere --url (modo real) o --offline IMAGEN")
 
-    if args.vlm_fallback:
+    if args.vlm_fallback == "ollama":
         import functools
         fallback_vlm = functools.partial(fallback_vlm_ollama,
                                          modelo=args.vlm_modelo)
+    elif args.vlm_fallback == "docbee":
+        fallback_vlm = fallback_vlm_docbee
     else:
         fallback_vlm = None
     resultado = resolver_web(args.url, headed=args.headed,
