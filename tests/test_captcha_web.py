@@ -12,6 +12,7 @@ import captcha_web
 
 from captcha_web import (
     _aplicar_fallback_vlm,
+    celda_de_bbox,
     fallback_vlm_docbee,
     fallback_vlm_ollama,
     indice_a_fila_col,
@@ -223,7 +224,7 @@ class TestResolverOffline(unittest.TestCase):
             llamadas.append(clase)
             return {(0, 1): [{"clase": clase, "score": 1.0}]}
 
-        with mock.patch("captcha_web.detectar_batch_worker",
+        with mock.patch("captcha_web.detectar_cuadricula_worker",
                         return_value={}):
             res = resolver_offline(
                 self._ruta_grid(), n=3,
@@ -236,7 +237,7 @@ class TestResolverOffline(unittest.TestCase):
                          "crosswalk")
 
     def test_sin_fallback_no_se_llama_al_vlm(self):
-        with mock.patch("captcha_web.detectar_batch_worker",
+        with mock.patch("captcha_web.detectar_cuadricula_worker",
                         return_value={}):
             res = resolver_offline(
                 self._ruta_grid(), n=3,
@@ -336,6 +337,24 @@ class TestListarFallos(unittest.TestCase):
         self.assertEqual(filas[0]["instruccion"],
                          "Select all images with cars")
         self.assertEqual(listar_fallos("/no/existe"), [])
+
+
+class TestCeldaDeBbox(unittest.TestCase):
+    def test_centro_del_bbox_mapea_a_la_celda(self):
+        # grid 3x3 de 300px: celdas de 100px
+        self.assertEqual(celda_de_bbox([10, 10, 50, 50], 3, 300, 300), (0, 0))
+        self.assertEqual(celda_de_bbox([110, 110, 150, 150], 3, 300, 300), (1, 1))
+        self.assertEqual(celda_de_bbox([210, 210, 260, 260], 3, 300, 300), (2, 2))
+        self.assertEqual(celda_de_bbox([40, 240, 60, 260], 3, 300, 300), (2, 0))
+
+    def test_fuera_de_la_cuadricula_devuelve_none(self):
+        self.assertIsNone(celda_de_bbox([-50, -50, -10, -10], 3, 300, 300))
+        # centro (320, 320) fuera de la imagen 300x300
+        self.assertIsNone(celda_de_bbox([290, 290, 350, 350], 3, 300, 300))
+
+    def test_grid_4x4_con_offset(self):
+        # grid 4x4 de 400px sin offset
+        self.assertEqual(celda_de_bbox([30, 220, 70, 260], 4, 400, 400), (2, 0))
 
 
 class TestUmbralObjetivo(unittest.TestCase):

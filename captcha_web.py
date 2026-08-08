@@ -333,6 +333,50 @@ def indice_a_fila_col(indice: int, n: int):
     return divmod(indice, n)
 
 
+def celda_de_bbox(bbox: list, n: int, ancho: float, alto: float):
+    """Centro del bbox (x1,y1,x2,y2) -> (fila, col) del tile correspondiente.
+
+    Usado para mapear las detecciones de la imagen COMPLETA del reto a sus
+    celdas (la deteccion completa recupera objetos que el recorte por celda
+    pierde — medido en el corpus de fallos 2026-08-07: 4/9 casos de
+    sub-seleccion recuperaron objetos)."""
+    cx = (bbox[0] + bbox[2]) / 2
+    cy = (bbox[1] + bbox[3]) / 2
+    tam = min(ancho, alto) // n
+    ox = (ancho - tam * n) // 2
+    oy = (alto - tam * n) // 2
+    fila = int((cy - oy) // tam)
+    col = int((cx - ox) // tam)
+    if 0 <= fila < n and 0 <= col < n:
+        return (fila, col)
+    return None
+
+
+def detectar_cuadricula_worker(imagen, n: int) -> dict:
+    """Deteccion RT-DETR sobre la imagen COMPLETA del reto, mapeada a celdas
+    por el centro del bbox (una sola carga del modelo via modo_objetos_lote).
+
+    Mejor recall que la deteccion por celda (las celdas recortadas pierden
+    el contexto de la escena): medido en el corpus, 4/9 casos de
+    sub-seleccion recuperaron objetos con la imagen completa.
+    """
+    from PIL import Image
+
+    from vision import modo_objetos_lote  # import perezoso (paddle)
+
+    with tempfile.TemporaryDirectory(prefix="captcha_grid_") as directorio:
+        ruta = os.path.join(directorio, "cuadricula.png")
+        imagen.save(ruta)
+        res = modo_objetos_lote([ruta])
+    ancho, alto = imagen.size
+    detecciones = {}
+    for det in res.get(ruta, []):
+        celda = celda_de_bbox(det.get("bbox", []), n, ancho, alto)
+        if celda is not None:
+            detecciones.setdefault(celda, []).append(det)
+    return detecciones
+
+
 def detectar_batch_worker(celdas_pil: list) -> dict:
     """Deteccion RT-DETR por lotes via subproceso del venv.
 
@@ -629,10 +673,14 @@ def resolver_web(url: str, headed: bool = False, salida: str = "",
             except Exception:
                 continue  # bframe en re-render: reintentar con la nueva captura
 
-            # 4) resolucion: celdas + RT-DETR batch + decision
+            # 4) resolucion: deteccion sobre la imagen COMPLETA (mejor
+            # recall que por celda, medido en el corpus) + decision
             celdas_pil = [(f, c, aumentar_escala(celda))
                           for f, c, celda in celdas_grid(imagen, n=n)]
-            detecciones = detectar_lote(celdas_pil)
+            if detectar_lote is None:
+                detecciones = detectar_cuadricula_worker(imagen, n)
+            else:
+                detecciones = detectar_lote(celdas_pil)
             es_variante_none = "skip" in instruccion.lower()
             if not es_variante_none and fallback_vlm is not None:
                 from captcha_ia import parsear_instruccion
@@ -836,7 +884,7 @@ def resolver_offline(imagen_ruta: str, n: int, instruccion: str,
     imagen = Image.open(imagen_ruta)
     celdas_pil = [(f, c, aumentar_escala(celda))
                   for f, c, celda in celdas_grid(imagen, n=n)]
-    detecciones = detectar_batch_worker(celdas_pil)
+    detecciones = detectar_cuadricula_worker(imagen, n)
     if fallback_vlm is not None:
         clase = parsear_instruccion(instruccion)
         detecciones = _aplicar_fallback_vlm(detecciones, celdas_pil, clase,
