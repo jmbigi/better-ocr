@@ -221,6 +221,60 @@ queda "no verificada" con aviso (la revisión sigue, honesta).
 - 6 tests nuevos del endpoint (200/400 por archivo inexistente y por clave
   `archivo`/`image`/reglas inexistentes, 503, health sin modelo).
 
+## 10. Buscador avanzado (`buscador.py`, 2026-08-12)
+
+Multi-motor con Playwright + detección de bloqueos/captchas + recetas CUIT.
+Suite: **25 tests nuevos** (parsers, normalización, dedupe/ranking, bloqueos).
+
+### 10.1 Reconocimiento de motores (HTML real, una visita por motor, esta IP)
+
+| Motor | Estado observado | Evidencia |
+|---|---|---|
+| Google | página "sorry" = **reCAPTCHA v2 estándar** (iframe `recaptcha/enterprise/anchor` + bframe; clic del ancla dispara el flujo; reto de tiles 3×3 "Select all images with a bus" verificado en vivo) | probe 2026-08-12 |
+| Bing | responde con resultados reales (10 `li.b_algo`) pero **degradados/irrelevantes** desde esta IP ("placeholder query" en dos consultas distintas) | 2 capturas |
+| Brave | **slider** anti-bot ("Arrastra el control deslizante") — no resoluble por el stack | captura |
+| DDG (html) | **challenge propio** ("Select all squares containing a duck") — no es reCAPTCHA | captura |
+| Ecosia | **turnstile** (Cloudflare) + "Un momento…" | captura |
+| Startpage | **conexión suspendida** (bloqueo de red, no captcha) | captura |
+| Mojeek | **403 Forbidden** | captura |
+| CuitOnline | búsqueda real funciona: `search/{q}` (la URL `/buscar/` da 404); "permanencia salud" → "Su búsqueda no obtuvo resultados" (coincide con el reporte del usuario); "ypf" → ASOC MUTUAL DEL PERSONAL YPF, CUIT 20-12345678-9 extraído | 3 capturas |
+| Dateas | **404 "Página no encontrada"** en `consulta_cuit?q=` (y variantes) — caída verificada, se reporta | 2 capturas |
+
+### 10.2 Parsers
+
+- **Bing** (verificado con HTML real): `li.b_algo` → `h2 a` + `p.b_lineclamp`; la URL del redirector `bing.com/ck/a?u=a1<base64>` se decodifica al destino real (2/2 URLs exactas en fixture real).
+- **CuitOnline** (verificado con HTML real): `div.hit` → `a.denominacion` (razón social) + `span.cuit` (XX-XXXXXXXX-X); caso vacío detectado sin resultados.
+- **Google y DDG**: parsers sobre su estructura documentada, marcados `parser_verificado: false` (esta IP no muestra resultados reales); se confirmarán en una IP sin bloqueo.
+- **Brave/Mojeek/Ecosia/Startpage**: solo detección de bloqueo (sin parser de resultados: no se pudo verificar su DOM desde aquí, P0.2).
+
+### 10.3 Detección de bloqueos (25 tests + verificación contra HTML real)
+
+`detectar_bloqueo`/`detectar_recaptcha` clasifican cada motor: captcha (Google, resoluble), captcha_slider (Brave), challenge_ddg, turnstile (Ecosia), suspendida (Startpage), http_403 (Mojeek), sin_resultados (CuitOnline), pagina_no_encontrada (Dateas). Verificado 6/6 contra los HTML capturados + 8 tests con fixtures.
+
+### 10.4 E2E real (CLI, 2026-08-12)
+
+`python3 buscador.py "Permanencia Salud" --motores bing --recetas cuit --salida /tmp/opencode/busq_smoke2` → bing ok (10 resultados, 3.4 s), cuitonline ok sin_resultados (3.9 s), dateas bloqueado 404 (3.5 s), JSON con `resultado.json` + HTML crudos por motor/receta (P0.1), ranking multi-motor funcional. El flujo de resolución de captcha quedó verificado en vivo a nivel de mecanismo (ancla → bframe con reto de tiles); la tasa de éxito del stack ya está medida en el §7 (~50-60%).
+
+## 11. Búsqueda de empresas (`empresas.py`, 2026-08-12)
+
+CLI que verifica una empresa reutilizando el motor de `buscador.py`. Suite: **16 tests nuevos** (variantes de nombre, extracción de CUIT/razón social, parseo RDAP).
+
+### 11.1 Ejecución real (4 empresas, salidas en `/tmp/opencode/emp_*`)
+
+| Empresa | CuitOnline (variantes) | Dateas | Web oficial | RDAP | Señales | CUIT |
+|---|---|---|---|---|---|---|
+| Permanencia Salud Srl (`--sitio permanencia.com.ar`) | 2 variantes: sin resultados | 404 | activa ("Cuidado y Acompañamiento para Adultos Mayores"), sin CUIT en HTML, sin razón social en pie | creado 2007-11-07 (RDAP nic.ar, sin www) | web activa, dominio registrado | **NO ENCONTRADO** |
+| Asistencia del Sol | sin resultados | 404 | (sin --sitio) | (sin --sitio) | solo Bing (degradado) | NO ENCONTRADO |
+| Cuidarte Siempre | sin resultados | 404 | (sin --sitio) | (sin --sitio) | solo Bing (degradado) | NO ENCONTRADO |
+| Asistencia Mis Abuelos | sin resultados | 404 | (sin --sitio) | (sin --sitio) | solo Bing (degradado) | NO ENCONTRADO |
+
+Detalles verificados:
+- **Sufijos legales anclados al final**: "Permanencia Salud Srl" → variantes ["Permanencia Salud Srl", "Permanencia Salud"]; "Sa Salud Srl" → "Sa Salud" (sin el ancla, "Sa" inicial se perdía — bug real encontrado por tests).
+- **Sitio oficial**: extrae CUITs (regex AFIP) y razón social del pie "© 2025 <razón social>" (recortando "Todos los derechos reservados."); con reintentos de navegación (la red es intermitente: ERR_NETWORK_CHANGED y timeouts transitorios observados 2 veces en la misma sesión).
+- **RDAP de NIC.AR**: solo registrador y fechas; el vcard del titular NUNCA se incluye (P0.9, cubierto por test con fixture que incluye un titular falso).
+- **Juicios**: 4 dorks por empresa ("X" juicio/fallo/demanda/sentencia) sobre Bing; desde esta IP Bing devuelve resultados degradados, por lo que el informe deja explícita la limitación (ausencia ≠ inexistencia; chequeo real = antecedentes con CUIT).
+- **Robustez**: si CuitOnline/Dateas fallan por red (ERR_NETWORK_CHANGED), se reintentan hasta 3 veces antes de reportar error; cada paso es independiente (el fallo de uno no corta el resto).
+
 ## Limitaciones verificadas
 
 - Scatter: no soportado por ChartParsing (alucina).
@@ -230,3 +284,5 @@ queda "no verificada" con aviso (la revisión sigue, honesta).
 - Portabilidad: solo probado en Linux/x86 (CPU 7.7 GB; GPU RTX 3070 8 GB validada en lección 17).
 - docbee en GPU 8 GB: requiere max_pixels ≤ 0.5M px (OOM a resolución nativa); flash attention exige cu_seqlens int32 (paddle 3.3.1 GPU promueve a int64); LD_LIBRARY_PATH del host no debe sombrear nvidia-cudnn del venv (lección 17).
 - Revisión (`revision.py`): la estimación de texto desbordado en xlsx es heurística (no hay motor de layout en openpyxl); la rúbrica VLM es perceptual y puede contradecir al análisis determinista (manda el determinista); docbee en GPU requiere el env de la lección 17 y `max_pixels` limitado; la integridad de la conversión ods→xlsx requiere odfpy (sin él, aviso "no verificada"); los estilos ODS se normalizan vía LibreOffice (no son XML de Excel).
+- Buscador (`buscador.py`): los parsers de Google y DDG no están verificados en vivo (esta IP está bloqueada en esos motores; quedan marcados `parser_verificado: false` hasta confirmarlos desde otra red); Bing devuelve resultados degradados/irrelevantes desde esta IP (el parser funciona, la calidad del origen no); la resolución de captcha hereda la tasa medida del stack (~50-60%); Dateas está caído (404 verificado) y la receta solo lo reporta; AFIP/ARCA no permite búsqueda pública por nombre (solo por CUIT, con captcha propio) — no incluida.
+- Empresas (`empresas.py`): el CUIT no encontrado en CuitOnline NO prueba que la razón social no exista en AFIP (puede no estar indexada o diferir el nombre legal) — el informe lo dice explícitamente; los dorks de juicios corren sobre Bing (degradado en esta IP) y la ausencia no prueba nada (limitación honesta del §11); el RDAP solo aporta registrador/fechas (sin titular, P0.9); la razón social del pie de web se extrae solo si el footer tiene el formato "© año <razón social>" (común pero no universal).

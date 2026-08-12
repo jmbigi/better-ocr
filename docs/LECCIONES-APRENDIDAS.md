@@ -371,3 +371,17 @@
 
 **Lección:** el cierre de una entrega incluye tres pasos que se hacen SIEMPRE juntos: auditoría de datos personales (grep + anonimización), verificación de cifras citadas contra la ejecución final, y prueba del camino recién tocado (la comparación ODS era código nuevo sin test).
 
+## 31. Buscador avanzado: la URL real de CuitOnline, el captcha de Google con tiles y los parsers solo con evidencia (2026-08-12)
+
+**Contexto:** módulo `buscador.py` (multi-motor con Playwright + recetas CUIT) solicitado por el programador; el caso de uso inicial era la búsqueda de CUIT de una empresa que CuitOnline no tenía indexada.
+
+**Hallazgo 1 — la URL de búsqueda real de CuitOnline es `/search/{q}`, no `/buscar/{q}`:** `/buscar/...` devuelve 404 ("La página solicitada no existe"); el formulario de la home (`#searchBox`, sin action) lleva a `https://www.cuitonline.com/search/<término>`. Verificado en vivo: "permanencia salud" → "Su búsqueda no obtuvo resultados" (idéntico al reporte del usuario que documentaba "3 búsquedas sin resultados") y "ypf" → ASOC MUTUAL DEL PERSONAL YPF con CUIT 20-12345678-9 (selector `a.denominacion` + `span.cuit`).
+
+**Hallazgo 2 — la página "sorry" de Google es reCAPTCHA v2 ESTÁNDAR con reto de tiles:** no basta el clic del checkbox del ancla (quedó sin marcar en 60 s de prueba): el bframe monta un reto 3×3 ("Select all images with a bus", verificado en vivo). Es exactamente el caso que resuelve el stack de `captcha_web` (detección imagen-completa + clics + VERIFY). El buscador resuelve el captcha en la MISMA sesión (cookies compartidas) reutilizando las funciones de captcha_web/captcha_ia (importadas, no duplicadas). El clic del ancla sí dispara el flujo (la URL pasa a `/sorry/index?continue=...`).
+
+**Hallazgo 3 — el redirector de Bing (`bing.com/ck/a?u=a1<base64>`) esconde la URL real:** el parser debe decodificar el parámetro `u=` (base64url) para deduplicar correctamente; los `<cite>` solo muestran la URL amigable. Verificado: 2/2 destinos reales exactos.
+
+**Hallazgo 4 — parsers solo con evidencia real (P0.2):** desde esta IP, Brave (slider), DDG (challenge "select all squares containing a duck"), Ecosia (turnstile), Startpage (conexión suspendida) y Mojeek (403) no muestran resultados jamás; Google tampoco. Solo Bing devuelve resultados (degradados/irrelevantes: "placeholder query" en dos consultas) y CuitOnline funciona. Los parsers de Google/DDG se escribieron sobre su estructura documentada y quedan marcados `parser_verificado: false` en el informe hasta confirmarse desde una red sin bloqueo — un parser "inventado" y no verificado sería peor que no tenerlo.
+
+**Lección:** antes de escribir parsers de widgets de terceros hay que capturar el DOM real de la zona de resultados y del bloqueo (como en la lección 21 con el DOM del captcha): la URL real, los selectores y el tipo de captcha se descubren en vivo, y lo que no se puede verificar se reporta como tal en el propio informe de salida.
+

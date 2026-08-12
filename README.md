@@ -29,6 +29,8 @@ Crear un procedimiento documentado, reproducible y validado en ejecución real p
 | `captcha_ia.py` | **Resolución de retos reCAPTCHA v2 con el stack local (RT-DETR + VLM):** piezas puras testeables (parser de instrucción, geometría de cuadrícula, decisor por celda) + demo sintética determinista `--local` (3×3/4×4, sin navegador). El pipeline `resolver()` recibe un detector inyectable. |
 | `captcha_web.py` | **Orquestador real con Playwright:** checkbox → reto en bframe → instrucción del DOM (fallback OCR PP-OCRv6) → captura → detección RT-DETR por celda (subproceso por lotes del venv, una carga) → confirmación VLM de dos etapas opcional (`--vlm-fallback`, ollama binario por tile) → clics JS en tiles → VERIFY/SKIP → veredicto por el checkbox ancla. Reintento tras re-render; umbral adaptativo por tamaño (0.45 en 3×3, 0.30 en 4×4, `--umbral-objetivo`); `--salida` guarda capturas + `intentos.json` (decisión y scores por celda, fallos analizables). Pasada offline sin navegador: `--offline IMAGEN --n 3 --instruccion "..."`. Requiere playwright en el python del sistema. |
 | `revision.py` | **Revisión de formato y presentación de planillas y documentos:** dos capas complementarias. (1) Análisis determinista — **xlsx/xlsm** con openpyxl (16 checks configurables por JSON: encabezados, bordes, alineación, anchos, formato numérico, filtros, celdas vacías/mezcladas, filas y columnas ocultas, errores de fórmula, duplicados de encabezado, texto desbordado, estilos inconsistentes, islas de datos, protección) + comparación entre versiones (`--comparar`: estructura, estilos y valores); **ods** normalizado vía LibreOffice con verificación de integridad de la conversión; **docx** con python-docx (8 checks: estilos de título vs negrita manual, fuentes, márgenes, numeración manual, párrafos vacíos, tablas sin bordes, encabezado/pie, imágenes); **pdf** con pypdfium2 (5 checks: páginas vacías/escasas, sin capa de texto, rotación, tamaños). (2) **Visión IA 360°** opt-in (`--vision docbee|ollama`) para cualquier formato: render a imagen (PDF nativo con pypdfium2; el resto LibreOffice → PDF → PNG) y rúbrica de 6 dimensiones de diseño/presentación con notas /10 parseadas y conteo de no conformes. |
+| `buscador.py` | **Buscador avanzado multi-motor (Playwright):** busca una consulta en Google/Bing/Brave/DDG/Mojeek/Ecosia/Startpage, detecta bloqueos y captchas por motor (verificados con HTML real de esta IP: Google "sorry" = reCAPTCHA v2, Brave slider, DDG challenge, Ecosia turnstile, Startpage suspendida, Mojeek 403) y con `--captcha` resuelve el reCAPTCHA v2 **en la misma sesión** reutilizando el stack de `captcha_web` (RT-DETR + clics, reto 3×3 verificado en vivo). Recetas de dominio: `--recetas cuit` busca razón social/CUIT en CuitOnline (`search/{q}`, parser verificado) y Dateas (hoy 404, reportado). JSON unificado por motor + síntesis con ranking multi-motor (bonus a cuitonline/dateas/afip). Sin dependencias nuevas: Playwright del python del sistema. |
+| `empresas.py` | **CLI de búsqueda de empresas:** verifica una empresa con pasos independientes — CuitOnline con variantes automáticas del nombre (limpia sufijos legales SRL/SA/SAS/SH) + Dateas; web oficial con `--sitio` (vigencia, CUITs y razón social del pie "©", con reintentos de red); RDAP NIC.AR del dominio (solo registrador y fechas, sin datos del titular); búsqueda web general + dorks de juicios (con limitación honesta: los expedientes laborales argentinos no son buscables públicamente por razón social). Informe JSON (`sintesis` con CUITs, señales de actividad y limitaciones) + resumen en consola. Reutiliza el motor de `buscador.py` (importado, no duplicado). |
 | `chart_server.py` | Daemon HTTP persistente: POST `/chart` (→ `markdown` + `csv`) y POST `/vision` (multi-modo), GET `/health`. Carga el modelo una sola vez y **se cierra solo tras 1 hora sin peticiones de inferencia** (no queda procesos en memoria). |
 | `requirements.txt` | Dependencias del proyecto (paddlepaddle 3.3.1, paddleocr[doc-parser] 3.7.0, pandas). |
 | `tests/test_extraccion.py` | Pruebas unitarias (stdlib + pandas, sin paddleocr): filtrado de separadores, conversión a DataFrame, acceso a la API y servidor HTTP con modelo simulado. |
@@ -102,6 +104,16 @@ python3 revision.py documento.pdf --vision ollama           # gemma3:4b local
 python3 chart_server.py --port 8080 --sin-modelo
 curl -X POST http://127.0.0.1:8080/revision -H 'Content-Type: application/json' \
      -d '{"archivo": "planilla.xlsx"}'
+
+# 3k. Buscador avanzado multi-motor (Playwright del python del sistema)
+python3 buscador.py "Permanencia Salud Srl"                  # todos los motores
+python3 buscador.py "YPF" --motores bing --recetas cuit      # motor + receta CUIT
+python3 buscador.py "empresa x" --captcha --salida /var/tmp/busq   # resuelve reCAPTCHA
+
+# 3l. Busqueda de EMPRESAS: CUIT, razon social, senales de actividad y juicios
+python3 empresas.py "Permanencia Salud Srl" --sitio permanencia.com.ar --salida /var/tmp/emp
+python3 empresas.py "Asistencia del Sol"                 # solo por nombre
+python3 empresas.py "X SRL" --sin-juicios                # mas rapido, sin dorks
 ```
 
 ## Perfiles por máquina (visión)
@@ -118,7 +130,7 @@ RAM medida por modo (MB): texto 1000, graficos rápido 1000, graficos VLM 5200, 
 
 ```bash
 # Sintaxis (sin dependencias)
-python3 -m py_compile extractor_final.py chart_server.py ocr_rapido.py vision.py captcha_ia.py captcha_web.py revision.py
+python3 -m py_compile extractor_final.py chart_server.py ocr_rapido.py vision.py captcha_ia.py captcha_web.py revision.py buscador.py empresas.py
 
 # Pruebas unitarias (solo stdlib + pandas; paddleocr se simula)
 python3 -m unittest discover -s tests -v

@@ -57,6 +57,8 @@ check "sintaxis: vision.py" python3 -m py_compile vision.py
 check "sintaxis: captcha_ia.py" python3 -m py_compile captcha_ia.py
 check "sintaxis: captcha_web.py" python3 -m py_compile captcha_web.py
 check "sintaxis: revision.py" python3 -m py_compile revision.py
+check "sintaxis: buscador.py" python3 -m py_compile buscador.py
+check "sintaxis: empresas.py" python3 -m py_compile empresas.py
 check "tests unitarios (stdlib + pandas)" python3 -m unittest discover -s tests -q
 
 echo "== 3. Config =="
