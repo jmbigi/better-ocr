@@ -9,7 +9,13 @@ Endpoints:
   POST /chart  {"image": "<ruta o URL a la imagen>"}
                -> {"ok": true, "filas": n, "markdown": "...", "csv": "..."}
                (400 JSON invalido/vacio, 413 cuerpo > 1 MB, 500 error interno)
-  GET  /health -> {"status": "ok", "modelo": "PP-Chart2Table", "uptime_s": ...}
+  POST /vision {"image": "...", "modo": "...", "fallback": bool}
+               -> resultado del modo (texto/graficos/doc/objetos/humano/auto)
+  POST /revision {"archivo": "planilla.xlsx", "reglas": "ruta opcional",
+                  "comparar": "otra.xlsx opcional", "vision": "docbee|ollama",
+                  "hoja", "max_hallazgos"} -> hallazgos de formato/presentacion
+               (analisis determinista + Vision IA 360 opt-in; sin modelos)
+  GET  /health -> {"status": "ok", "modelo": "...", "uptime_s": ...}
 
 Diseño:
   - HTTPServer de UN solo hilo a propósito: PaddleX NO es thread-safe, las
@@ -35,6 +41,7 @@ Antes de la primera ejecucion: export TMPDIR=/var/tmp (evitar OSError 122).
 import argparse
 import json
 import logging
+import os
 import signal
 import sys
 import threading
@@ -102,17 +109,22 @@ def crear_handler(modelo, estado):
 
         def do_GET(self):
             if self.path != "/health":
-                self._enviar_json(404, {"ok": False, "error": "Solo GET /health o POST /chart o POST /vision"})
+                self._enviar_json(404, {"ok": False, "error": "Solo GET /health o POST /chart o POST /vision o POST /revision"})
                 return
             self._enviar_json(200, {
                 "status": "ok",
-                "modelo": "PP-Chart2Table",
+                "modelo": "PP-Chart2Table" if modelo else "no cargado (--sin-modelo)",
                 "modos": ["auto", "texto", "graficos", "doc", "objetos", "humano"],
+                "revision": True,
                 "uptime_s": round(time.time() - estado["inicio"]),
             })
 
-        def _recibir_json(self):
-            """Lee y valida el cuerpo JSON. Devuelve (None, datos) o (codigo, error)."""
+        def _recibir_json(self, clave="image"):
+            """Lee y valida el cuerpo JSON. Devuelve (None, datos) o (codigo, error).
+
+            `clave` es la clave obligatoria segun el endpoint ('image' para
+            /chart y /vision, 'archivo' para /revision).
+            """
             try:
                 largo = int(self.headers.get("Content-Length", 0))
             except ValueError:
@@ -132,10 +144,10 @@ def crear_handler(modelo, estado):
                 datos = json.loads(self.rfile.read(largo).decode("utf-8"))
             except Exception as exc:  # JSON invalido
                 return 400, f"JSON invalido: {exc}"
-            if not isinstance(datos, dict) or not isinstance(datos.get("image"), str):
+            if not isinstance(datos, dict) or not isinstance(datos.get(clave), str):
                 # JSON valido pero sin la clave esperada: mensaje distinto del
                 # JSON malformado, para que la API no mienta sobre la causa.
-                return 400, "Se espera un objeto JSON con la clave 'image' (ruta o URL de la imagen)"
+                return 400, f"Se espera un objeto JSON con la clave '{clave}'"
             return None, datos
 
         def _procesar_vision(self, datos):
@@ -155,14 +167,48 @@ def crear_handler(modelo, estado):
             resultado = vision.ejecutar(datos["image"], modo, con_fallback)
             self._enviar_json(200, resultado)
 
+        def _procesar_revision(self, datos):
+            """POST /revision: revision de formato/presentacion (xlsx).
+
+            Sin modelos: analisis determinista (openpyxl) + comparacion y
+            Vision IA 360 opcionales. No marca actividad de inferencia.
+            """
+            import revision
+
+            if not os.path.exists(datos["archivo"]):
+                self._enviar_json(400, {"ok": False,
+                                        "error": f"el archivo no existe: {datos['archivo']}"})
+                return
+            reglas = datos.get("reglas") or None
+            if reglas and not os.path.exists(reglas):
+                self._enviar_json(400, {"ok": False,
+                                        "error": f"el archivo de reglas no existe: {reglas}"})
+                return
+            LOG.info("Revision de: %s (reglas: %s)", datos["archivo"], reglas or "defaults")
+            resultado = revision.revisar_documento(
+                datos["archivo"], reglas=revision.cargar_reglas(reglas)[0],
+                comparar=datos.get("comparar"),
+                hoja_solo=datos.get("hoja"),
+                max_hallazgos=int(datos.get("max_hallazgos", 500)),
+                vision=datos.get("vision"),
+                vision_host=datos.get("vision_host", "127.0.0.1"),
+                vision_device=datos.get("vision_device", "cuda"),
+                vision_modelo=datos.get("vision_modelo", "gemma3:4b"))
+            self._enviar_json(200, resultado)
+
         def do_POST(self):
-            if self.path not in ("/chart", "/vision"):
-                self._enviar_json(404, {"ok": False, "error": "Solo GET /health o POST /chart o POST /vision"})
+            if self.path not in ("/chart", "/vision", "/revision"):
+                self._enviar_json(404, {"ok": False, "error": "Solo GET /health o POST /chart o POST /vision o POST /revision"})
                 return
 
-            error, datos = self._recibir_json()
+            clave = "archivo" if self.path == "/revision" else "image"
+            error, datos = self._recibir_json(clave)
             if error:
                 self._enviar_json(error, {"ok": False, "error": datos})
+                return
+
+            if self.path == "/revision":
+                self._procesar_revision(datos)
                 return
 
             # Marcar actividad y bloquear el cierre por inactividad
@@ -171,6 +217,10 @@ def crear_handler(modelo, estado):
             try:
                 if self.path == "/vision":
                     self._procesar_vision(datos)
+                    return
+                if modelo is None:
+                    self._enviar_json(503, {"ok": False,
+                                            "error": "modelo no cargado (servidor con --sin-modelo)"})
                     return
                 LOG.info("Inferencia iniciada para: %s", datos["image"])
                 t0 = time.time()
@@ -220,6 +270,12 @@ def main():
         default=3600,
         help="Segundos de inactividad antes de cerrarse (default: 3600 = 1 hora)",
     )
+    parser.add_argument(
+        "--sin-modelo",
+        action="store_true",
+        help="No cargar el modelo VLM (4.8 GB): sirve /health y /revision "
+             "sin inferencia (/chart responde 503)",
+    )
     args = parser.parse_args()
 
     logging.basicConfig(
@@ -227,7 +283,11 @@ def main():
         format="%(asctime)s %(levelname)s %(message)s",
     )
 
-    modelo = cargar_modelo()
+    if args.sin_modelo:
+        modelo = None
+        LOG.info("Modo sin modelo: solo /health y /revision (sin inferencia)")
+    else:
+        modelo = cargar_modelo()
     estado = {"inicio": time.time(), "ultima_actividad": time.time(), "ocupado": False}
     server = HTTPServer((args.host, args.port), crear_handler(modelo, estado))
 

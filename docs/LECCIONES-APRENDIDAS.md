@@ -331,3 +331,43 @@
 **Explicación probable:** la métrica del corpus (tamaño de selección cercano al típico) NO mide la CORRECCIÓN de las celdas — H selecciona más celdas con tamaños plausibles pero con más celdas erróneas, lo que aumenta los rechazos. El adversario castiga el exceso de selección tanto como la falta.
 
 **Lección:** la mejora de recall de un detector debe validarse por TASA EN VIVO, no por métricas de tamaño sobre un corpus — y el default se queda con el modelo que la mide mejor (L). La lección 24 se refuerza: cambiar el detector mueve los modos de fallo, no la tasa (~50-60%).
+## 28. Módulo de revisión de formato: determinista vs Visión IA 360 (2026-08-12)
+
+**Contexto:** nuevo módulo `revision.py` (revisión de formato/presentación de planillas xlsx con dos capas: análisis determinista con openpyxl y Visión IA 360° con VLM local sobre render LibreOffice→PDF→pypdfium2→PNG), solicitado por el programador junto con el estudio de herramientas existentes (spreadsheet-auditor, XLChek, excel-validator, The Checker, Spreadsheet Detective: todas se centran en FÓRMULAS y datos; ninguna gratuita cubre el nicho de estilo/consistencia visual — el hueco que cubre este módulo).
+
+**Hallazgo 1 — la capa determinista y la visual se contradicen con razón:** una planilla real con 219 celdas sin bordes (detectado por openpyxl sobre el XML) fue puntuada por docbee como "coherencia de estilo 9/10: bordes uniformes" sobre la imagen renderizada. No es un bug: la percepción visual a baja resolución no ve lo que el XML dice exactamente. Regla de diseño: la capa determinista manda para hechos objetivos; la visual aporta percepción de diseño (legibilidad, color, equilibrio) que ninguna herramienta de XML puede medir.
+
+**Hallazgo 2 — el VLM no obedece el formato de la rúbrica de forma estable:** docbee respondió en dos formatos distintos en ejecuciones casi idénticas ("dimensión: nota/10 | comentario" y "10/10: dimensión | comentario") y una vez con dimensiones inventadas repetidas ("Diseño de la planilla", "Utilidad de la planilla") que no están en la rúbrica. Solución: parser que acepta ambos órdenes, normaliza a prefijos canónicos y cuenta las líneas fuera de rúbrica como `no_conformes` (verificado: 7 en una ejecución real). La respuesta "no conforme" se reporta, no se silencia.
+
+**Hallazgo 3 — los checks deterministas se afinan con ejecución real:** el primer run sobre la planilla sintética "correcta" produjo 26 falsos warnings (el check de formato numérico contaba "0" y "0.00" como "sin formato" y los enteros en General como problema). Fix: solo "General"/"@" son señales en flotantes; enteros en General (años, conteos) son normales. Y la API de openpyxl: `hoja.protection.sheet` (no `sheet_protection`), y los checks deben verificar que una columna sin nombre tiene datos reales (una celda fusionada amplia no es una columna).
+
+**Hallazgo 4 — prueba con datos reales solo sobre copia:** las planillas reales del programador (carpeta de envío de su ámbito personal, fuera del repo) se copiaron con `cp -p` a un directorio temporal (`/var/tmp`) antes de revisar; el original quedó intacto (P0.3/P1.9). La revisión detectó hallazgos reales y útiles (textos desbordados en columnas estrechas, falta de filtros y bordes) — evidencia de valor práctico, no solo sintético. El contenido de celdas no se difundió en el repo ni en el chat (P0.9).
+
+**Lección:** un módulo de revisión de documentos necesita dos capas complementarias (hechos exactos + percepción visual) y ambas se verifican con ejecución real sobre datos propios y datos del usuario (copiados). El VLM es parte útil del sistema pero su salida se debe sanear contra la rúbrica esperada, contando lo no conforme en vez de ignorarlo.
+
+## 29. Fase 2 de la revisión (ods/docx/pdf): saneos, defaults engañosos y fixtures con estilos (2026-08-12)
+
+**Contexto:** completar el módulo `revision.py` con ods (normalización LibreOffice), docx (python-docx) y pdf (pypdfium2), más la Visión IA 360 sobre PDF con render nativo (sin soffice). Dependencias nuevas instaladas SOLO en el venv: `python-docx`, `odfpy` (P0.5), declaradas en requirements.txt.
+
+**Hallazgo 1 — `reglas=None` no se saneaba en los revisores nuevos:** `revisar_docx`/`revisar_pdf` hacían `reglas[regla]` con reglas=None → `TypeError: 'NoneType' object is not subscriptable` en la API pública (el CLI pasa reglas saneadas y lo enmascaraba). Fix: todos los revisores sanean `if reglas is None: reglas, _ = cargar_reglas()` como ya hacía `revisar_planilla`.
+
+**Hallazgo 2 — el default "Normal Table" de python-docx NO dibuja bordes:** el primer check de tablas buscaba estilos sin "grid"/"tabla", pero python-docx asigna `_TableStyle('Normal Table')` a las tablas sin estilo: contiene "tabla" y el check no reportaba nada. Fix: "Normal Table"/"Tabla normal" se reportan explícitamente como tablas sin bordes visibles.
+
+**Hallazgo 3 — `pandas.to_excel(engine="odf")` genera ODS sin estilos:** el fixture ODS "correcto" salía con 5 errores de encabezado porque pandas no aplica estilos. Fix: el fixture ODS se genera con soffice convirtiendo el xlsx correcto (conserva estilos). Lección: los fixtures de formato deben generarse con las mismas herramientas que los usuarios (LibreOffice), no con la ruta más corta.
+
+**Hallazgo 4 — la integridad ODS depende de odfpy (python del sistema vs venv):** el CLI corre con el python del sistema (sin odfpy) y la verificación de integridad fallaba con ImportError → revisión marcada "ok: False" injustamente. Fix: si odfpy falta, la integridad queda `{"ok": None, "aviso": "no verificada"}` y la revisión sigue (honestidad sin romper el flujo); con el venv (odfpy instalado) la integridad se verifica de verdad (hojas y dimensiones idénticas).
+
+**Hallazgo 5 — los PdfDocument de pypdfium2 deben cerrarse:** unittest avisó "The following objects are still open" — el documento se cierra ahora en `finally`, también en `render_pdf_a_pngs`.
+
+**Lección:** los formatos nuevos se añaden con el mismo contrato (checks puros + saneo de reglas + cierre de recursos + fixtures realistas con estilos), y cada dependencia opcional degrada con aviso explícito, nunca con un fallo mudo o injusto.
+
+## 30. Cierre del módulo de revisión: comparar ODS, cifras de docs y auditoría P0.9 (2026-08-12)
+
+**Hallazgo 1 — `--comparar` con ODS fallaba con BadZipFile:** `comparar_planillas` abre los archivos con openpyxl, que no lee ODS; comparar una planilla ODS (o contra una ODS) reventaba sin capturar (500 en el servidor, crash en CLI). Fix: en `revisar_documento` ambos lados de la comparación se normalizan a xlsx temporal con soffice cuando la extensión es ods, con limpieza en `finally` (test: correcta.ods vs v1.xlsx → 2 diferencias de hoja).
+
+**Hallazgo 2 — las cifras de la documentación se desactualizaron durante el desarrollo:** PRUEBAS §9.3 y el Estado del README decían "219/219 tests" cuando la suite real era de 211 (la cifra se escribió durante una iteración intermedia). Fix: 211 en ambos sitios, verificados contra `unittest` real. Lección: las cifras de tests en docs se escriben DESPUÉS de la corrida final, nunca de memoria.
+
+**Hallazgo 3 — auditoría P0.9 obligatoria antes de commit:** el dif a commitear incluía una ruta personal del programador (`/home/kubuntu/mama/cuidadores/ENVIO/`) citada en la lección 28 y el nombre de un directorio temporal que la evocaba. Se anonimizó en LECCIONES y PRUEBAS ("carpeta de envío del programador, ámbito personal" + directorio temporal `/var/tmp`). Auditoría de cierre: grep de rutas personales, nombres, emails e IPs sobre todos los archivos versionables → limpio (P0.9/P0.10). El contenido de celdas reales (nombres, proveedores) nunca entró al repo: solo resúmenes numéricos agregados.
+
+**Lección:** el cierre de una entrega incluye tres pasos que se hacen SIEMPRE juntos: auditoría de datos personales (grep + anonimización), verificación de cifras citadas contra la ejecución final, y prueba del camino recién tocado (la comparación ODS era código nuevo sin test).
+

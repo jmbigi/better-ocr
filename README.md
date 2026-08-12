@@ -8,7 +8,7 @@ Crear un procedimiento documentado, reproducible y validado en ejecución real p
 - Robustez operativa: gestión del error `OSError(122)` (`TMPDIR`), acceso defensivo a la API de PaddleX, limpieza del Markdown y conversión a CSV.
 - Despliegue real: lecciones empíricas verificadas (una sola instancia por máquina, PaddleX no es thread-safe, patrón daemon persistente).
 
-**Estado:** Verificado con ejecución real en dos entornos: Arch (Python 3.12, 6/6 valores exactos en gráfico de barras propio) y Kubuntu (Python 3.11.9, imagen oficial de PaddleOCR: 6/6 valores exactos; servidor validado con 74 s de inferencia en caliente y auto-cierre por inactividad verificado). Extendido con **cascada rápida multi-modo** (texto/gráficos/doc/objetos, ver `vision.py`): benchmark real en esta máquina (7 GB RAM, CPU): PP-OCRv6 lee 12/12 valores + 6/6 años de un gráfico de barras en ~56 s y ~1 GB; ChartParsing 18/18 celdas en ~333 s y 5.2 GB; RT-DETR-L detecta objetos reales en ~18 s y ~0.9 GB; PP-StructureV3 layout en ~323 s y 4.5 GB. **Servicio captcha (reCAPTCHA v2): validado en vivo contra la demo oficial** — campaña de 69 ejecuciones reales (2026-08-07, 30 ok = 43% agregado); stack final medido: detección **imagen-completa** (default, mejor recall que por celdas) + RT-DETR-L (default; RT-DETR-H con `--modelo-detector`) + confirmación VLM opt-in (`--vlm-fallback docbee|ollama`) + umbral adaptativo (`--umbral-objetivo`); corpus de 58 fallos re-evaluable (`--archivo-fallos`, `scripts/replay_fallos.py`); ver `docs/PRUEBAS.md` §7 y lecciones 20-27. Limitado estrictamente a las pruebas descritas: gráficos de líneas y otros tipos no garantizados; modos pinturas/objetos-avanzados requieren hardware mayor (ver abajo).
+**Estado:** Verificado con ejecución real en dos entornos: Arch (Python 3.12, 6/6 valores exactos en gráfico de barras propio) y Kubuntu (Python 3.11.9, imagen oficial de PaddleOCR: 6/6 valores exactos; servidor validado con 74 s de inferencia en caliente y auto-cierre por inactividad verificado). Extendido con **cascada rápida multi-modo** (texto/gráficos/doc/objetos, ver `vision.py`): benchmark real en esta máquina (7 GB RAM, CPU): PP-OCRv6 lee 12/12 valores + 6/6 años de un gráfico de barras en ~56 s y ~1 GB; ChartParsing 18/18 celdas en ~333 s y 5.2 GB; RT-DETR-L detecta objetos reales en ~18 s y ~0.9 GB; PP-StructureV3 layout en ~323 s y 4.5 GB. **Servicio captcha (reCAPTCHA v2): validado en vivo contra la demo oficial** — campaña de 69 ejecuciones reales (2026-08-07, 30 ok = 43% agregado); stack final medido: detección **imagen-completa** (default, mejor recall que por celdas) + RT-DETR-L (default; RT-DETR-H con `--modelo-detector`) + confirmación VLM opt-in (`--vlm-fallback docbee|ollama`) + umbral adaptativo (`--umbral-objetivo`); corpus de 58 fallos re-evaluable (`--archivo-fallos`, `scripts/replay_fallos.py`); ver `docs/PRUEBAS.md` §7 y lecciones 20-27. **Revisión de formato y presentación (`revision.py`): validado el 2026-08-12** — 211 tests (16 checks deterministas xlsx + 8 docx + 5 pdf + comparación de versiones + rúbrica VLM), planillas sintéticas de referencia (`scripts/generar_planillas.py`: correcta 0 hallazgos, con_fallos detecta 14 checks, docx correcto 0 y con_fallos 8 warnings, pdf limpio 0) y ejecución real sobre planillas del usuario (copia en `/var/tmp`, original intacto): presupuesto 221 warnings (219 bordes + filtro + ancho), proveedores 20 warnings + 6 info (textos desbordados incluidos); **Visión IA 360° en vivo con docbee GPU** (rúbrica 6 dimensiones en ~28-34 s/página, notas parseadas + no_conformes) sobre xlsx y PDF (render nativo). Limitado estrictamente a las pruebas descritas: gráficos de líneas y otros tipos no garantizados; modos pinturas/objetos-avanzados requieren hardware mayor (ver abajo).
 
 ## Repositorio
 
@@ -28,14 +28,17 @@ Crear un procedimiento documentado, reproducible y validado en ejecución real p
 | `vision.py` | **CLI multi-modo de visión:** `auto` (clasifica y rutea), `texto` (PP-OCRv6), `graficos` (cascada), `doc` (PP-StructureV3 layout-only), `objetos` (RT-DETR-L) y `humano` (filtro clase person). Salidas json/csv/md. |
 | `captcha_ia.py` | **Resolución de retos reCAPTCHA v2 con el stack local (RT-DETR + VLM):** piezas puras testeables (parser de instrucción, geometría de cuadrícula, decisor por celda) + demo sintética determinista `--local` (3×3/4×4, sin navegador). El pipeline `resolver()` recibe un detector inyectable. |
 | `captcha_web.py` | **Orquestador real con Playwright:** checkbox → reto en bframe → instrucción del DOM (fallback OCR PP-OCRv6) → captura → detección RT-DETR por celda (subproceso por lotes del venv, una carga) → confirmación VLM de dos etapas opcional (`--vlm-fallback`, ollama binario por tile) → clics JS en tiles → VERIFY/SKIP → veredicto por el checkbox ancla. Reintento tras re-render; umbral adaptativo por tamaño (0.45 en 3×3, 0.30 en 4×4, `--umbral-objetivo`); `--salida` guarda capturas + `intentos.json` (decisión y scores por celda, fallos analizables). Pasada offline sin navegador: `--offline IMAGEN --n 3 --instruccion "..."`. Requiere playwright en el python del sistema. |
+| `revision.py` | **Revisión de formato y presentación de planillas y documentos:** dos capas complementarias. (1) Análisis determinista — **xlsx/xlsm** con openpyxl (16 checks configurables por JSON: encabezados, bordes, alineación, anchos, formato numérico, filtros, celdas vacías/mezcladas, filas y columnas ocultas, errores de fórmula, duplicados de encabezado, texto desbordado, estilos inconsistentes, islas de datos, protección) + comparación entre versiones (`--comparar`: estructura, estilos y valores); **ods** normalizado vía LibreOffice con verificación de integridad de la conversión; **docx** con python-docx (8 checks: estilos de título vs negrita manual, fuentes, márgenes, numeración manual, párrafos vacíos, tablas sin bordes, encabezado/pie, imágenes); **pdf** con pypdfium2 (5 checks: páginas vacías/escasas, sin capa de texto, rotación, tamaños). (2) **Visión IA 360°** opt-in (`--vision docbee|ollama`) para cualquier formato: render a imagen (PDF nativo con pypdfium2; el resto LibreOffice → PDF → PNG) y rúbrica de 6 dimensiones de diseño/presentación con notas /10 parseadas y conteo de no conformes. |
 | `chart_server.py` | Daemon HTTP persistente: POST `/chart` (→ `markdown` + `csv`) y POST `/vision` (multi-modo), GET `/health`. Carga el modelo una sola vez y **se cierra solo tras 1 hora sin peticiones de inferencia** (no queda procesos en memoria). |
 | `requirements.txt` | Dependencias del proyecto (paddlepaddle 3.3.1, paddleocr[doc-parser] 3.7.0, pandas). |
 | `tests/test_extraccion.py` | Pruebas unitarias (stdlib + pandas, sin paddleocr): filtrado de separadores, conversión a DataFrame, acceso a la API y servidor HTTP con modelo simulado. |
 | `tests/test_ocr_rapido.py` | Pruebas del emparejamiento geométrico y la fusión de pasadas OCR (modelo simulado, sin paddle). |
 | `tests/test_vision.py` | Pruebas del clasificador auto-modo y formatos de salida. |
+| `tests/test_revision.py` | Pruebas de `revision.py` (41 tests): checks de formato puros sobre libros en memoria, reglas JSON, comparación de versiones, parser de la rúbrica VLM y gestión de errores (LibreOffice y motores simulados). |
 | `scripts/verificar-proyecto.sh` | Verificación local completa (open source, sin cuentas): sintaxis, tests, reglas P0/P1, config, seguridad y repo. `bash scripts/verificar-proyecto.sh`. |
 | `scripts/benchmark_ocr.py` | Benchmark de motores (ChartParsing / PP-StructureV3 / PP-OCRv6 / PP-OCRv5) sobre la misma imagen: tiempo de carga, inferencia, RAM y puntuación contra la referencia oficial. |
 | `scripts/generar_charts.py` | Genera gráficos de prueba con datos CONOCIDOS (matplotlib, seaborn, plotly) + CSV de referencia como ground truth. |
+| `scripts/generar_planillas.py` | Genera documentos de prueba sintéticos para el módulo de revisión: `correcta.xlsx` (0 hallazgos), `con_fallos.xlsx` (viola 14 checks), `v1/v2.xlsx` (para `--comparar`), `correcta.ods` (con estilos, vía soffice), `documento_correcto.docx` / `documento_con_fallos.docx` (estilos vs formato manual) y `documento.pdf`. |
 | `scripts/validar_cascada.py` | Valida la ruta rápida (ocr_rapido) contra los CSV de referencia de `ejemplos/test_charts/`. |
 | `scripts/bateria_360.py` | **Batería 360°:** compara VLM locales (docbee / ollama) en 6 dimensiones (QA UI, interpretación, valores, objetos, descripción, documento) con las mismas imágenes y prompts; scoring automático + rúbrica humana. |
 | `scripts/hooks/pre-commit` | Hook git local que ejecuta la verificación antes de cada commit (instalación: `cp scripts/hooks/pre-commit .git/hooks/pre-commit`). |
@@ -83,6 +86,22 @@ python3 captcha_web.py --url https://pagina.con.recaptcha --salida /var/tmp/reto
 
 # 3g. Captcha: fallback VLM para clases no-COCO (crosswalks, stairs...)
 python3 captcha_web.py --url https://pagina.con.recaptcha --vlm-fallback
+
+# 3h. Revision de formato/presentacion (analisis determinista)
+python3 revision.py planilla.xlsx                  # xlsx/xlsm/ods/docx/pdf
+python3 revision.py planilla.xlsx --reglas reglas.json      # reglas propias
+python3 revision.py v1.xlsx --comparar v2.xlsx              # diff de versiones
+python3 revision.py documento.docx --salida md              # resumen legible
+
+# 3i. Revision con Vision IA 360 (diseno/presentacion por VLM local:
+#     render -> PNG -> rubrica de 6 dimensiones)
+.venv/bin/python revision.py planilla.xlsx --vision docbee  # GPU (o --device cpu)
+python3 revision.py documento.pdf --vision ollama           # gemma3:4b local
+
+# 3j. Revision por servidor sin cargar el modelo VLM (solo /health y /revision)
+python3 chart_server.py --port 8080 --sin-modelo
+curl -X POST http://127.0.0.1:8080/revision -H 'Content-Type: application/json' \
+     -d '{"archivo": "planilla.xlsx"}'
 ```
 
 ## Perfiles por máquina (visión)
@@ -99,7 +118,7 @@ RAM medida por modo (MB): texto 1000, graficos rápido 1000, graficos VLM 5200, 
 
 ```bash
 # Sintaxis (sin dependencias)
-python3 -m py_compile extractor_final.py chart_server.py ocr_rapido.py vision.py captcha_ia.py captcha_web.py
+python3 -m py_compile extractor_final.py chart_server.py ocr_rapido.py vision.py captcha_ia.py captcha_web.py revision.py
 
 # Pruebas unitarias (solo stdlib + pandas; paddleocr se simula)
 python3 -m unittest discover -s tests -v
@@ -123,6 +142,7 @@ python3 -m unittest discover -s tests -v
 - **Cascada de gráficos:** la ruta rápida (PP-OCRv6 + geometría) solo es fiable con categorías tipo año consecutivas y etiquetas de valor legibles; el gate la rechaza y cae al VLM ChartParsing en cualquier otra situación (líneas, pastel, scatter, etiquetas solapadas).
 - **Límites de "visión 360°":** pinturas/dibujos/descripción de escenas requieren un VLM de captioning (PaddleOCR-VL 0.9B ≈ 4.7-9 GB) — fuera del alcance de esta máquina de 7 GB. Objetos reales y personas: RT-DETR-L (validado, ~0.9 GB).
 - **VLM locales en CPU (batería 360°):** gemma3:4b es el punto dulce (12/12 valores en ~150 s, RAM segura); qwen2.5vl:7b mejora la descripción de escenas modestamente pero es 2.7× más lento y puede dejar la RAM del host crítica (descargar con `keep_alive=0` tras cada uso). Los modelos comerciales de referencia superan a ambos locales en granularidad descriptiva. **Ollama no es servicio permanente**: el harness lo arranca bajo demanda en la primera ejecución y se detiene con `pkill -f "ollama serve"`.
+- **Revisión de formato (`revision.py`):** el análisis determinista (openpyxl/python-docx/pypdfium2) es exacto sobre el archivo (p. ej. 219 celdas sin bordes en una planilla real que el VLM "ve" bien); la Visión IA 360° es perceptual y puede contradecirlo (la capa determinista manda para hechos objetivos, la visual para diseño/apariencia). La rúbrica del VLM a veces devuelve dimensiones inventadas o notas sin dimensión: se parsean las válidas y el resto se cuenta como `no_conformes` (verificado con docbee en vivo). Formatos: xlsx/xlsm (openpyxl), ods (normalización LibreOffice + integridad opcional con odfpy), docx (python-docx), pdf (pypdfium2).
 - **docbee (PP-DocBee-2B) en la batería 360°: VALIDADO en GPU (RTX 3070 8 GB)** — 8/8 tests del harness (`scripts/bateria_360.py --motor docbee --device cuda`); gana ui_qa (4/4 vs 2/4) y personas (1/2 vs 0/2) frente a gemma3:4b, y pie 5/5. Corre con `max_pixels` reducido a 0.5M px para caber en 8 GB (OOM a resolución nativa), por lo que en lectura de valores queda por debajo de gemma (3/12 vs 7/12). Entorno GPU: `paddlepaddle-gpu==3.3.1` (índice oficial cu126) + `LD_LIBRARY_PATH` con los `nvidia/*/lib` del venv por delante. Detalle: `docs/PRUEBAS.md` §4.1 y lección 17.
 - **Imágenes de prueba externas:** contenido con derechos de terceros → solo en directorios temporales, nunca en el repo.
 

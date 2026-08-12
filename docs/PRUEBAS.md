@@ -152,6 +152,75 @@ Pendientes (requieren ejecución en vivo o VLM libre):
 - Build: fallo por tmpfs (Bus error) resuelto con CARGO_TARGET_DIR en disco.
 - RAM no medida (monitor del proceso no fiable con `&`); sin OOM con swap.
 
+## 9. Revisión de formato y presentación (`revision.py`, 2026-08-12)
+
+Dos capas: análisis determinista (openpyxl) + Visión IA 360° (VLM local sobre
+render del libro). Suite completa: **193/193 tests** (16 checks + comparación +
+parser de rúbrica + endpoint del servidor).
+
+### 9.1 Planillas sintéticas (`scripts/generar_planillas.py`)
+
+| Planilla | Resultado | Evidencia |
+|---|---|---|
+| `correcta.xlsx` | **0 hallazgos** (error 0, warning 0, info 0) | CLI real |
+| `con_fallos.xlsx` | **12 errores + 51 warnings + 8 info**; detecta 14 checks: encabezados sin negrita (8), bordes (44), anchos (1), formato numérico (3: "120" como texto + General en flotantes), filtros (1), celdas vacías (1), celdas mezcladas (1), fila oculta (1), columna oculta (1), #DIV/0! (1), encabezado duplicado (1), texto desbordado (6), estilos inconsistentes (1), islas de datos (1) | CLI real |
+| `v1.xlsx` vs `v2.xlsx` | 6 diferencias: dimensión (A1:B4 → A1:B5), encabezado B1, 2 valores, fila nueva (2 celdas) | `--comparar` |
+
+### 9.2 Datos reales del programador (copia previa, original intacto)
+
+Planillas de la carpeta de envío del programador (ámbito personal, copiadas
+con `cp -p` a un directorio temporal `/var/tmp`; los reportes JSON quedan
+fuera del repo; contenido de celdas no difundido, P0.9):
+
+| Planilla | Determinista | Visión IA 360 (docbee GPU) |
+|---|---|---|
+| PRESUPUESTO...xlsx | 221 warnings: 219 celdas sin bordes, sin auto-filtro, 1 ancho fuera de rango | 1 página, rúbrica 8/9/7/6/8/7 (legibilidad/coherencia/color/estructura/formato/presentación), 33.8 s |
+| PROVEEDORES...xlsx | 20 warnings + 6 info: 18 sin bordes, sin filtro, 1 ancho, **6 textos probablemente desbordados** (C3, E6, E8, C12...) | 1 página, rúbrica 10/9/8/7, **7 líneas no conformes** (docbee inventó dimensiones repetidas) |
+
+**Hallazgo de diseño (lección):** la capa determinista ve el XML exacto
+(219 celdas sin bordes) mientras el VLM evalúa la imagen renderizada y puede
+decir "bordes uniformes" (9/10). No es una contradicción: la determinista
+manda para hechos objetivos, la visual para percepción de diseño.
+
+**Hallazgo del parser de rúbrica:** docbee respondió en dos formatos distintos
+en ejecuciones casi idénticas — "dimensión: nota/10 | comentario" y
+"10/10: dimensión | comentario" — y una vez con dimensiones inventadas
+repetidas ("Diseño de la planilla", "Utilidad..."). El parser acepta ambos
+órdenes, normaliza a prefijos canónicos de la rúbrica y cuenta el resto como
+`no_conformes` (7 en la segunda ejecución real).
+
+### 9.3 Fase 2: ods, docx y pdf (2026-08-12, mismos sintéticos)
+
+Suite completa tras la fase 2: **211/211 tests** (16 checks xlsx + 8 docx + 5
+pdf + comparación + rúbrica + endpoint).
+
+| Formato | Fixture correcto | Fixture con fallos |
+|---|---|---|
+| `ods` (soffice normaliza→xlsx) | `correcta.ods`: **0/0/0**; integridad de conversión verificada con odfpy (venv) y "no verificada con aviso" sin él (python del sistema) | — |
+| `docx` (python-docx) | `documento_correcto.docx`: **0 errores, 0 warnings, 1 info** (sin encabezado/pie, informativo) | `documento_con_fallos.docx`: **8 warnings + 2 info** — título manual con negrita 18pt, 3 fuentes mezcladas, márgenes 0.4 cm, 3 numeraciones manuales, racha de 3 párrafos vacíos, tabla sin estilo ("Normal Table" no dibuja bordes) |
+| `pdf` (pypdfium2) | `documento.pdf` (convertido de docx): **0/0/0**, 1 página, 331 caracteres | checks probados por unidad (páginas vacías/escasas, sin capa de texto, rotación, tamaños) |
+
+**Visión IA 360° sobre PDF (render nativo sin soffice):** `documento.pdf` con
+docbee GPU → 6/6 dimensiones parseadas (8/9/7/6/8/7), 0 no conformes, 28.3 s.
+
+**Hallazgos de la fase 2:** (1) `reglas=None` no se saneaba en los revisores
+docx/pdf (TypeError en la API pública; los revisores ahora sanean como
+`revisar_planilla`). (2) python-docx asigna "Normal Table" por defecto a las
+tablas: un check que solo buscara estilos `None`/sin "grid" dejaba pasar el
+default sin bordes — ahora "Normal Table" se reporta explícitamente. (3) El
+fixture ODS inicial se generó con `pandas.to_excel(engine="odf")` que NO aplica
+estilos (falsos errores de encabezado); se genera vía soffice desde el xlsx
+correcto para conservar estilos. (4) la integridad ODS necesita odfpy: sin él
+queda "no verificada" con aviso (la revisión sigue, honesta).
+
+### 9.4 Servidor
+
+- `POST /revision` con `--sin-modelo`: 200 con resumen de hallazgos (~0.2 s);
+  `/health` informa `"modelo": "no cargado (--sin-modelo)"`; `/chart` → **503**
+  (sin el VLM cargado, no se gasta RAM). Verificado en vivo 2026-08-12.
+- 6 tests nuevos del endpoint (200/400 por archivo inexistente y por clave
+  `archivo`/`image`/reglas inexistentes, 503, health sin modelo).
+
 ## Limitaciones verificadas
 
 - Scatter: no soportado por ChartParsing (alucina).
@@ -160,3 +229,4 @@ Pendientes (requieren ejecución en vivo o VLM libre):
 - qwen2.5vl:7b en CPU: deja la RAM del host crítica; descargar con `keep_alive=0`.
 - Portabilidad: solo probado en Linux/x86 (CPU 7.7 GB; GPU RTX 3070 8 GB validada en lección 17).
 - docbee en GPU 8 GB: requiere max_pixels ≤ 0.5M px (OOM a resolución nativa); flash attention exige cu_seqlens int32 (paddle 3.3.1 GPU promueve a int64); LD_LIBRARY_PATH del host no debe sombrear nvidia-cudnn del venv (lección 17).
+- Revisión (`revision.py`): la estimación de texto desbordado en xlsx es heurística (no hay motor de layout en openpyxl); la rúbrica VLM es perceptual y puede contradecir al análisis determinista (manda el determinista); docbee en GPU requiere el env de la lección 17 y `max_pixels` limitado; la integridad de la conversión ods→xlsx requiere odfpy (sin él, aviso "no verificada"); los estilos ODS se normalizan vía LibreOffice (no son XML de Excel).

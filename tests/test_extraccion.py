@@ -20,6 +20,7 @@ import urllib.request
 from http.server import HTTPServer
 
 import pandas as pd
+from openpyxl import Workbook
 
 sys.path.insert(0, ".")
 
@@ -316,6 +317,77 @@ class TestChartServer(unittest.TestCase):
             ejecutar_falso.assert_called_once_with("foto.png", "objetos", False)
         self.assertEqual(codigo, 200)
         self.assertTrue(cuerpo["ok"])
+
+    def _xlsx_temporal(self):
+        """Planilla xlsx temporal para probar /revision."""
+        wb = Workbook()
+        hoja = wb.active
+        hoja.append(["A", "B"])
+        hoja.append([1, 2])
+        fd, ruta = tempfile.mkstemp(suffix=".xlsx")
+        os.close(fd)
+        wb.save(ruta)
+        self.addCleanup(os.unlink, ruta)
+        return ruta
+
+    def test_revision_ok(self):
+        ruta = self._xlsx_temporal()
+        codigo, cuerpo = self._req("/revision", {"archivo": ruta})
+        self.assertEqual(codigo, 200)
+        self.assertTrue(cuerpo["ok"])
+        self.assertEqual(cuerpo["formato"], "xlsx")
+        self.assertIn("resumen", cuerpo)
+        self.assertIsInstance(cuerpo["hallazgos"], list)
+
+    def test_revision_archivo_inexistente(self):
+        codigo, cuerpo = self._req("/revision", {"archivo": "/no/existe.xlsx"})
+        self.assertEqual(codigo, 400)
+        self.assertIn("no existe", cuerpo["error"])
+
+    def test_revision_requiere_clave_archivo(self):
+        # la clave esperada es 'archivo' (no 'image'): el 400 lo dice
+        codigo, cuerpo = self._req("/revision", {"image": "planilla.xlsx"})
+        self.assertEqual(codigo, 400)
+        self.assertIn("clave 'archivo'", cuerpo["error"])
+
+    def test_revision_reglas_inexistentes(self):
+        ruta = self._xlsx_temporal()
+        codigo, cuerpo = self._req("/revision", {"archivo": ruta,
+                                                 "reglas": "/no/existe.json"})
+        self.assertEqual(codigo, 400)
+        self.assertIn("reglas", cuerpo["error"])
+
+    def test_chart_sin_modelo_503(self):
+        estado = {"inicio": time.time(), "ultima_actividad": time.time(), "ocupado": False}
+        server = HTTPServer(("127.0.0.1", 8126), chart_server.crear_handler(None, estado))
+        hilo = threading.Thread(target=server.serve_forever, daemon=True)
+        hilo.start()
+        try:
+            datos = json.dumps({"image": "ejemplos/grafico_demo.png"}).encode()
+            req = urllib.request.Request("http://127.0.0.1:8126/chart", data=datos,
+                                         headers={"Content-Type": "application/json"})
+            with self.assertRaises(urllib.error.HTTPError) as ctx:
+                urllib.request.urlopen(req, timeout=10)
+            self.assertEqual(ctx.exception.code, 503)
+        finally:
+            server.shutdown()
+            server.server_close()
+            hilo.join(timeout=5)
+
+    def test_health_sin_modelo_dice_no_cargado(self):
+        estado = {"inicio": time.time(), "ultima_actividad": time.time(), "ocupado": False}
+        server = HTTPServer(("127.0.0.1", 8127), chart_server.crear_handler(None, estado))
+        hilo = threading.Thread(target=server.serve_forever, daemon=True)
+        hilo.start()
+        try:
+            with urllib.request.urlopen("http://127.0.0.1:8127/health", timeout=10) as resp:
+                cuerpo = json.loads(resp.read().decode())
+            self.assertEqual(cuerpo["modelo"], "no cargado (--sin-modelo)")
+            self.assertTrue(cuerpo["revision"])
+        finally:
+            server.shutdown()
+            server.server_close()
+            hilo.join(timeout=5)
 class TestDFAMarkdown(unittest.TestCase):
     def test_celda_multilinea_no_rompe_tabla(self):
         df = pd.DataFrame({"A": ["x\ny"], "B": [1]})

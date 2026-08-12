@@ -8,3 +8,15 @@
 paddlepaddle==3.3.1
 paddleocr[doc-parser]==3.7.0
 pandas>=2.0
+
+# Modulo de revision de formato/presentacion (revision.py):
+# openpyxl: analisis determinista de xlsx (ya instalado con pandas como extra)
+# pypdfium2: render PDF -> PNG para la Vision IA 360 (requiere LibreOffice
+#            en el sistema para la conversion xlsx -> PDF)
+openpyxl>=3.1
+pypdfium2>=5.0
+# python-docx: revision de documentos docx
+python-docx>=1.1
+# odfpy: verificacion de integridad de la conversion ods (opcional: sin el,
+#        la revision ods funciona con aviso de integridad no verificada)
+odfpy>=1.1
