@@ -36,6 +36,7 @@ import json
 import os
 import re
 import time
+import unicodedata
 import urllib.parse
 
 from empresas import extraer_cuits_de_html, limpiar_sufijo_legal
@@ -142,7 +143,6 @@ def extraer_resultados_boletin_oficial(html: str) -> list:
 
 def _norm(s: str) -> str:
     """Normaliza para comparar: minusculas, sin acentos, espacios unicos."""
-    import unicodedata
     n = unicodedata.normalize("NFD", s or "")
     n = "".join(c for c in n if unicodedata.category(c) != "Mn")
     return re.sub(r"\s+", " ", n.lower()).strip()
