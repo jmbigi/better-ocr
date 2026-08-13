@@ -385,3 +385,23 @@
 
 **Lección:** antes de escribir parsers de widgets de terceros hay que capturar el DOM real de la zona de resultados y del bloqueo (como en la lección 21 con el DOM del captcha): la URL real, los selectores y el tipo de captcha se descubren en vivo, y lo que no se puede verificar se reporta como tal en el propio informe de salida.
 
+
+## 32. Suite de búsqueda empresarial: correos, judiciales, analizador CUIT y tabla del dominio (2026-08-13)
+
+**Contexto:** sesión de extensión de `empresas.py` (correos y canales de contacto), módulos nuevos `judiciales.py`, `analizar_cuit.py` y `buscador_empresas.py` (TABLA-EMPRESAS-CUIT-TIPO), solicitados por el programador como "suite de clase mundial" con la regla del dominio TODO REAL ("No consta — pedir por escrito").
+
+**Hallazgo 1 — el Boletín Oficial estuvo caído/timeout desde esta IP TODO el día (2026-08-13):** curl y Playwright daban `000`/`ERR_NETWORK_CHANGED` mientras el resto de hosts (cuitonline, bing, csjn) respondían normal. El flujo de navegación quedó implementado (home → `#rapidaInput` → CLIC en `#busquedaRapidaButton`, Enter no dispara el AJAX) y el parser de resultados marcado `parser_verificado: False` hasta capturar HTML real. Regla: una fuente caída se reporta con su estado real en el informe, nunca se finge el parseo.
+
+**Hallazgo 2 — NIC.AR oculta el titular del dominio tras un handle numérico:** el RDAP de asistenciadelsol.com.ar devolvió el registrant solo con `handle: 2737...` sin vcard (sin org ni fn). El titular "no_publicado" es un estado real de Argentina, no un fallo del parser. Además el registrador salía vacío (vcard sin org/fn): el parser ahora cae al handle (nicar). Los datos de contacto del titular (fn, email, tel) NUNCA se exponen (P0.9) aunque el whois los publique.
+
+**Hallazgo 3 — el index de CuitOnline se degradó el 13/8:** "permanencia salud" y "asistencia del sol" (que el 12/8 devolvían resultados) daban "no obtuvo resultados"; "ypf" solo devolvía la mutual (CUIL). La ficha de EMPRESA (fecha inicio/actividad/empleados) quedó pendiente de verificación; la ficha de PERSONA FÍSICA se verificó en vivo (CUIT 27-12345678-9: "Empleador: No", "Impuestos activos: GANANCIAS/IVA/AUTONOMOS" → señal de Responsable Inscripto, Provincia/Localidad). La ficha publica el SEXO del titular: no se extrae (P0.9).
+
+**Hallazgo 4 — CuitOnline ya no tiene sección "juicios":** el detalle hoy solo ofrece "Deudas" redirigiendo al formulario BCRA con clave fiscal. PJN ConsultaExpedientes es una SPA Angular ofuscada sin API pública; IUS no responde; CSJN `/buscador/documentos` no filtra por query (devuelve todo el catálogo). Fuentes reales de litigio: Boletín Oficial (caído) + dorks web. Todo declarado en las limitaciones del informe (la ausencia NO prueba nada).
+
+**Hallazgo 5 — el título real de la ficha de CuitOnline incluye la localidad:** "NOMBRE (CUIT), Castelar (Buenos Aires) - Cuit Online": el primer regex de cabecera no toleraba el ", Localidad" y la razón social quedaba vacía (fila "No consta" con ficha cargada). Fix: `\s*,?.*?[-–]\s*Cuit Online` perezoso. Los tests sintéticos con títulos "limpios" no alcanzan: se valida con el HTML real capturado.
+
+**Hallazgo 6 — la condición tributaria se INFIERE de los impuestos activos, no se inventa:** la ficha no dice "Responsable Inscripto" textualmente para este CUIT; la presencia de IVA+Ganancias+Autónomos es la señal (marcada "senal: impuestos activos"). Si aparece "monotributo" en la ficha, esa es la condición. La edad NO es derivable del DNI: solo banda de emisión con advertencia explícita (P1.10).
+
+**Hallazgo 7 — auditoría P0.9/P0.10 antes del commit:** el fixture de test contenía el NOMBRE REAL del titular de un CUIT (pegado de la tabla del usuario) y el documento de investigación legal de empleadores pertenece al proyecto de cuidados, no a better-ocr: se movió a su proyecto. Sanitizado a "TITULAR PERSONA FISICA" y referencias quitadas de AGENTS/README. Lección: los datos que el programador pega en el chat pueden ser personales; al entrar al repo se anonimizan o se descartan.
+
+**Lección:** una suite de búsqueda se construye pieza por pieza con verificación en vivo de cada fuente (P0.2), reportando lo no verificable en el propio informe (parser del BO, ficha de empresa), y antes del commit se auditan datos personales (nombres de titulares, sexo, rutas) aunque vengan del propio programador.
