@@ -1,20 +1,19 @@
 #!/usr/bin/env python3
 """Buscador de DEMANDAS JUDICIALES y senales de litigio (Argentina).
 
-Fuentes (exploradas y verificadas en vivo el 2026-08-12):
+Fuentes (exploradas y verificadas en vivo):
   1. Boletin Oficial (boletinoficial.gob.ar): edictos de quiebras,
      concursos, remates, sociedades y declaraciones judiciales, buscables
      por nombre o CUIT. La búsqueda es AJAX con sesion: se navega a la home,
      se escribe en la busqueda rapida y se hace CLIC en el boton (Enter no
-     dispara el JS). El flujo de navegacion queda implementado; el parser de
-     resultados queda marcado NO VERIFICADO hasta capturar HTML real de
-     resultados (durante la verificacion esta IP sufrio timeouts continuos
-     al BO mientras el resto de hosts respondia; P0.1/P0.2).
+     dispara el JS). Parser VERIFICADO contra HTML real capturado el
+     2026-08-13 (39 resultados para 'asistencia del sol'; estructura
+     div.linea-aviso con p.item, p.item-detalle y h5.seccion-rubro).
   2. Dorks web multi-motor (buscador.py; parser de Bing verificado en esta
      IP): "X" juicio / fallo / demanda / sentencia / expediente / juzgado /
      CNAT, para empresas Y personas.
 
-LIMITACIONES HONESTAS (P1.6, verificadas hoy):
+LIMITACIONES HONESTAS (P1.6, verificadas):
   - CNAT, SECLO y juzgados NO son buscables publicamente por nombre de
     parte: no existe base publica de demandas por razon social en Argentina.
   - PJN ConsultaExpedientes (que si consulta por partes) es una SPA Angular
@@ -23,6 +22,9 @@ LIMITACIONES HONESTAS (P1.6, verificadas hoy):
   - La ausencia en estas fuentes NO prueba que no existan demandas: el
     chequeo real es el informe de antecedentes judiciales (CNAT/SECLO) o el
     certificado de reincidencia con el CUIT/DNI.
+  - El BO indexa por PALABRA: 'asistencia del sol' devuelve 39 avisos que
+    contienen 'asistencia' como palabra comun (no la empresa): el filtro de
+    interes usa la frase completa o 2+ palabras significativas.
 
 Uso:
     python3 judiciales.py "Asistencia del Sol" --salida /var/tmp/jud
@@ -84,52 +86,93 @@ def armar_dorks_judiciales(nombre: str) -> list:
 
 def extraer_resultados_boletin_oficial(html: str) -> list:
     """Resultados del Boletin Oficial desde el HTML de la busqueda rapida.
-    NO VERIFICADO CONTRA HTML REAL: durante la verificacion el BO no
-    respondio desde esta IP; la estructura se deriva de su plantilla
-    (contenedores 'resultado...' con fecha, seccion y titulo enlazado).
-    Se marcara verificado cuando se capture HTML real (P0.2: hasta entonces
-    el estado del flujo se reporta como 'parser_no_verificado')."""
+    VERIFICADO contra HTML real capturado el 2026-08-13 (busqueda
+    'asistencia del sol': 39 resultados, estructura div.linea-aviso con
+    p.item = denominacion, p.item-detalle > small = detalle, h5.seccion-
+    rubro = rubro/seccion, a[href=/detalleAviso/...] = enlace)."""
     resultados = []
     zona = html
     m = re.search(r'<div id="subLayouyContentDiv".*', html, re.S)
     if m:
         zona = m.group(0)
-    for bloque in re.findall(r'<div[^>]*class="[^"]*resultado[^"]*".*?(?=<div[^>]*class="[^"]*resultado|$)', zona, re.S):
-        t = re.search(r'<h[34][^>]*>(?:<a[^>]*>)?([^<]{5,160})', bloque, re.S)
-        a = re.search(r'<a[^>]*href="([^"]+)"', bloque)
-        fecha = re.search(r"(?:fecha|publicacion)[^>]*>\s*([0-3]?\d[-/][01]?\d[-/]20\d{2})",
-                          bloque, re.I)
-        seccion = re.search(r"seccion[^>]*>\s*([^<]{3,40})", bloque, re.I)
-        if not t:
+    # seccion actual (el ultimo h5.seccion-rubro antes de cada aviso)
+    seccion = ""
+    partes = re.split(r'(<h5 class="seccion-rubro[^"]*"[^>]*>.*?</h5>)',
+                      zona, flags=re.S)
+    for parte in partes:
+        hs = re.search(r'<h5 class="seccion-rubro[^"]*"[^>]*>(.*?)</h5>',
+                       parte, re.S)
+        if hs:
+            seccion = re.sub(r"\s+", " ", re.sub(r"<[^>]+>", " ", hs.group(1))).strip()
             continue
-        texto = " ".join(re.findall(r">([^<]{3,120})<", bloque))[:400]
-        resultados.append({
-            "titulo": re.sub(r"\s+", " ", t.group(1)).strip(),
-            "url": "https://www.boletinoficial.gob.ar" + a.group(1)
-                   if a else "",
-            "fecha": fecha.group(1) if fecha else "",
-            "seccion": re.sub(r"\s+", " ", seccion.group(1)).strip()
-                       if seccion else "",
-            "snippet": re.sub(r"\s+", " ", texto)[:300],
-            "cuits": sorted(extraer_cuits_de_html(bloque)),
-            "litigio": bool(RE_HALLAZGO_LITIGIO.search(bloque)),
-            "posicion": len(resultados) + 1,
-        })
+        # cada aviso es <a href="/detalleAviso/..."><div class="linea-aviso">...
+        # el enlace ENVUELVE al bloque (verificado en HTML real 2026-08-13)
+        for m_aviso in re.finditer(
+                r'<a href="(/detalleAviso/[^"]+)"[^>]*>.*?'
+                r'<div class="linea-aviso">.*?(?=<a href="/detalleAviso/|$)',
+                parte, re.S):
+            bloque = m_aviso.group(0)
+            p = re.search(r'<p class="item">(.*?)</p>', bloque, re.S)
+            if not p:
+                continue
+            detalles = re.findall(r'<p class="item-detalle">(.*?)</p>',
+                                  bloque, re.S)
+            snippet = " ".join(
+                re.sub(r"\s+", " ", re.sub(r"<[^>]+>", " ", d)).strip()
+                for d in detalles)
+            fecha = re.search(r"(?:0[1-9]|[12]\d|3[01])/(?:0[1-9]|1[0-2])/20\d{2}",
+                              bloque)
+            titulo = re.sub(r"\s+", " ", re.sub(r"<[^>]+>", " ", p.group(1))).strip()
+            titulo = titulo.replace("&nbsp;", " ")
+            snippet = snippet.replace("&nbsp;", " ")
+            texto_bloque = titulo + " " + snippet + " " + seccion
+            resultados.append({
+                "titulo": titulo,
+                "url": "https://www.boletinoficial.gob.ar" + m_aviso.group(1)
+                       if m_aviso.group(1) else "",
+                "fecha": fecha.group(0) if fecha else "",
+                "seccion": seccion,
+                "snippet": snippet[:300],
+                "cuits": sorted(extraer_cuits_de_html(bloque)),
+                "litigio": bool(RE_HALLAZGO_LITIGIO.search(texto_bloque)),
+                "posicion": len(resultados) + 1,
+            })
     return resultados
 
 
+def _norm(s: str) -> str:
+    """Normaliza para comparar: minusculas, sin acentos, espacios unicos."""
+    import unicodedata
+    n = unicodedata.normalize("NFD", s or "")
+    n = "".join(c for c in n if unicodedata.category(c) != "Mn")
+    return re.sub(r"\s+", " ", n.lower()).strip()
+
+
 def _es_resultado_interesante(r: dict, nombre: str, cuit: str = "") -> bool:
-    """Un resultado del BO es interesante si menciona el CUIT exacto o una
-    palabra del nombre (los edictos publican la razon social/denominacion
-    y a veces el CUIT del deudor/concursado)."""
-    texto = (r.get("titulo", "") + " " + r.get("snippet", "")).lower()
-    if cuit:
-        cuit_digitos = cuit.replace("-", "")
-        if cuit_digitos in texto.replace("-", ""):
+    """Un resultado del BO es interesante si menciona el CUIT exacto, o la
+    FRASE del nombre normalizado aparece completa, o al menos DOS palabras
+    significativas del nombre coinciden (una sola palabra comun como
+    'asistencia' no alcanza: el BO resalta la palabra buscada en todo el
+    listado y genera falsos positivos, verificado 2026-08-13)."""
+    texto = _norm(r.get("titulo", "") + " " + r.get("snippet", ""))
+    if cuit and cuit.replace("-", "") in texto.replace("-", ""):
+        return True
+    if not nombre:
+        return False
+    frases = [_norm(v) for v in (nombre, limpiar_sufijo_legal(nombre))]
+    for frase in frases:
+        if frase and frase in texto:
             return True
-    for pal in nombre.lower().split():
-        if len(pal) > 3 and pal in texto:
-            return True
+    # palabras significativas: >= 3 letras y no stopwords ('del', 'sol' SI
+    # cuenta; 'de', 'la', 'el', 'y' no). Coincidencia por PALABRA completa:
+    # 'sol' no debe matchear dentro de 'solucion' (verificado 2026-08-13).
+    STOP = {"de", "del", "la", "las", "el", "los", "un", "una", "y", "a",
+            "o", "e", "en", "que", "por", "sa", "srl", "sas"}
+    pal_nombre = {p for p in _norm(nombre).split()
+                  if len(p) >= 3 and p not in STOP}
+    if len(pal_nombre) >= 2:
+        return sum(1 for p in pal_nombre
+                   if re.search(rf"\b{re.escape(p)}\b", texto)) >= 2
     return False
 
 
@@ -293,9 +336,9 @@ def _sintetizar(informe: dict, nombre: str, cuit: str = "") -> dict:
             "La ausencia en estas fuentes NO prueba que no existan demandas: "
             "el chequeo real es el informe de antecedentes judiciales "
             "(CNAT/SECLO) o el certificado de reincidencia con CUIT/DNI.",
-            "El parser del Boletin Oficial puede estar pendiente de "
-            "verificacion contra HTML real (P0.1): revisar el HTML crudo "
-            "guardado con --salida.",
+            "El BO indexa por palabra: los resultados pueden contener la "
+            "palabra buscada sin ser la empresa (el filtro de interes exige "
+            "la frase completa o 2+ palabras significativas).",
         ],
     }
 

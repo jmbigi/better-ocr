@@ -1,9 +1,9 @@
 """Pruebas de judiciales.py (piezas puras: variantes de nombre, dorks de
 litigio, parser del Boletin Oficial y sintesis). Sin Playwright ni red.
 
-El parser del BO se prueba contra un fixture sintetico de su plantilla
-(documentada en el codigo como NO VERIFICADA contra HTML real: el BO sufrio
-timeouts desde esta IP el 2026-08-12); los tests reflejan esa limitacion."""
+El parser del BO se prueba contra un fixture derivado del HTML REAL
+capturado el 2026-08-13 (estructura div.linea-aviso + h5.seccion-rubro,
+39 resultados para 'asistencia del sol')."""
 
 import unittest
 
@@ -13,25 +13,52 @@ from judiciales import (armar_dorks_judiciales,
 
 FIXTURE_BO = """
 <div id="subLayouyContentDiv">
-  <div class="resultado-buscador">
-    <span class="fecha-publicacion">12/08/2026</span>
-    <span class="seccion-publicacion">Edictos</span>
-    <h4><a href="/sections/edictos/2026/08/12/1234.html">
-      EDICTO: Quiebra de ASISTENCIA DEL SOL S.R.L. (CUIT 30-71234567-8)</a></h4>
-    <p>El Juzgado Nacional de Primera Instancia en lo Comercial N° 12
-       declaró la quiebra de ASISTENCIA DEL SOL S.R.L. y ordenó la
-       verificación de créditos.</p>
+  <div class="row">
+    <div class="col-md-12">
+      <h5 class="seccion-rubro text-white bg-primary">EDICTOS JUDICIALES -
+        CITACIONES Y NOTIFICACIONES. CONCURSOS Y QUIEBRAS. OTROS</h5>
+    </div>
   </div>
-  <div class="resultado-buscador">
-    <h4><a href="/sections/edictos/2026/08/11/5678.html">
-      EDICTO: Concurso preventivo de Otra Empresa S.A.</a></h4>
-    <p>Citase a los acreedores de OTRA EMPRESA S.A.</p>
+  <div class="row">
+    <div class="col-md-12">
+      <a href="/detalleAviso/segunda/A1000001/20260812?busqueda=2">
+        <div class="linea-aviso">
+          <p class="item">ASISTENCIA DEL SOL S.R.L.</p>
+          <p class="item-detalle"><small>El Juzgado Nacional de 1ra
+            Instancia en lo Comercial N 12 declaro la quiebra de ASISTENCIA
+            DEL SOL S.R.L. (CUIT 30-71234567-8) y ordeno la verificacion de
+            creditos.</small></p>
+        </div>
+      </a>
+    </div>
   </div>
-  <div class="resultado-buscador">
-    <span class="fecha-publicacion">10/08/2026</span>
-    <h4><a href="/sections/sociedades/2026/08/10/999.html">
-      Sociedades: disolucion sin concurso</a></h4>
-    <p>Edicto de disolucion voluntaria sin intervencion judicial.</p>
+  <div class="row">
+    <div class="col-md-12">
+      <h5 class="seccion-rubro text-white bg-primary">CONVOCATORIAS Y
+        AV.COMERCIALES - AVISOS</h5>
+    </div>
+  </div>
+  <div class="row">
+    <div class="col-md-12">
+      <a href="/detalleAviso/segunda/A1000002/20260811?busqueda=2">
+        <div class="linea-aviso">
+          <p class="item">OTRA EMPRESA S.A.</p>
+          <p class="item-detalle"><small>Convocatoria a asamblea
+            ordinaria.</small></p>
+        </div>
+      </a>
+    </div>
+  </div>
+  <div class="row">
+    <div class="col-md-12">
+      <a href="/detalleAviso/segunda/A1000003/20260810?busqueda=2">
+        <div class="linea-aviso">
+          <p class="item">SECRETARIA DE EDUCACION</p>
+          <p class="item-detalle"><small>Resolucion administrativa sin
+            relacion judicial.</small></p>
+        </div>
+      </a>
+    </div>
   </div>
 </div>
 """
@@ -65,19 +92,20 @@ class TestDorks(unittest.TestCase):
 
 class TestParserBO(unittest.TestCase):
 
-    def test_extrae_resultados_y_cuits(self):
+    def test_extrae_resultados_cuits_y_seccion(self):
         r = extraer_resultados_boletin_oficial(FIXTURE_BO)
         self.assertEqual(len(r), 3)
-        self.assertIn("Quiebra de ASISTENCIA DEL SOL", r[0]["titulo"])
+        self.assertEqual(r[0]["titulo"], "ASISTENCIA DEL SOL S.R.L.")
         self.assertEqual(r[0]["cuits"], ["30-71234567-8"])
         self.assertTrue(r[0]["litigio"])
+        self.assertIn("CONCURSOS Y QUIEBRAS", r[0]["seccion"])
+        self.assertIn("detalleAviso", r[0]["url"])
         self.assertFalse(r[2]["litigio"])
-        self.assertIn("Concurso preventivo de Otra Empresa", r[1]["titulo"])
 
     def test_marca_litigio_solo_en_edictos_judiciales(self):
         r = extraer_resultados_boletin_oficial(FIXTURE_BO)
         self.assertTrue(r[0]["litigio"])
-        self.assertTrue(r[1]["litigio"])
+        self.assertFalse(r[1]["litigio"])
         self.assertFalse(r[2]["litigio"])
 
     def test_html_vacio(self):
@@ -95,9 +123,21 @@ class TestInteresante(unittest.TestCase):
              "snippet": "CUIT 30-71234567-8 declarada la quiebra"}
         self.assertTrue(self._f(r, "Otra Empresa", "30-71234567-8"))
 
-    def test_por_palabra_del_nombre(self):
+    def test_por_frase_completa_del_nombre(self):
         r = {"titulo": "EDICTO: Quiebra de ASISTENCIA DEL SOL S.R.L.",
              "snippet": "verificacion de creditos"}
+        self.assertTrue(self._f(r, "Asistencia del Sol"))
+
+    def test_palabra_comun_sola_no_alcanza(self):
+        """Verificado 2026-08-13: 'asistencia del sol' devuelve 39 avisos
+        con 'asistencia' como palabra comun; el filtro NO debe marcarlos."""
+        r = {"titulo": "AVISO: asistencia en la sede social",
+             "snippet": "Los accionistas..."}
+        self.assertFalse(self._f(r, "Asistencia del Sol"))
+
+    def test_dos_palabras_significativas_si_alcanzan(self):
+        r = {"titulo": "EDICTO: ASISTENCIA SOL EMPRESA DE CUIDADOS",
+             "snippet": ""}
         self.assertTrue(self._f(r, "Asistencia del Sol"))
 
     def test_falso_positivo_descartado(self):
