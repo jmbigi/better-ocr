@@ -7,9 +7,9 @@ Fixtures de CuitOnline derivados de HTML REAL capturado el 2026-08-12
 import json
 import unittest
 
-from empresas import (dominios_candidatos, extraer_cuits_de_html,
-                      extraer_emails_de_html,
-                      extraer_razon_social_de_html,
+from empresas import (_capturas_html, _parsear_cdx, consultar_cdx,
+                      dominios_candidatos, extraer_cuits_de_html,
+                      extraer_emails_de_html, extraer_razon_social_de_html,
                       extraer_redes_de_html, extraer_whatsapp_de_html,
                       limpiar_sufijo_legal, parsear_rdap,
                       variantes_de_nombre)
@@ -356,6 +356,113 @@ class TestSintesisEmails(unittest.TestCase):
         self.assertEqual(sin["canales_contacto"], [])
         self.assertTrue(any("correo publicado" in lim
                             for lim in sin["limitaciones"]))
+
+    def test_rns_indexada_sin_resultados_agrega_limitacion(self):
+        sin = self._sintetizar(self.informe(
+            rns={"base": "rns.db", "indexada": True, "resultados": [],
+                 "error": ""}))
+        self.assertIn("NO consta en el Registro Nacional de Sociedades",
+                      sin["limitaciones"][0])
+        self.assertTrue(any("NO consta en el RNS" in s
+                            for s in sin["senales_actividad"]))
+
+    def test_rns_con_resultados_aporta_cuit_y_senal(self):
+        sin = self._sintetizar(self.informe(
+            rns={"base": "rns.db", "indexada": True,
+                 "resultados": [{
+                     "cuit": "30-12345678-9",
+                     "razon_social": "PERMANENCIA SALUD S.R.L.",
+                     "tipo_societario": "S.R.L.", "fecha_contrato": "2018-03-15",
+                     "dom_provincia": "BUENOS AIRES",
+                     "dom_localidad": "QUILMES", "origen": "sociedades",
+                     "coincidencia": 2}],
+                 "error": ""}))
+        self.assertIn({"cuit": "30-12345678-9",
+                       "razon_social": "PERMANENCIA SALUD S.R.L.",
+                       "fuente": "RNS"}, sin["cuits"])
+        self.assertTrue(any("registrada en el RNS" in s
+                            for s in sin["senales_actividad"]))
+
+    def test_rns_no_indexada_avisa_como_crearla(self):
+        sin = self._sintetizar(self.informe(
+            rns={"base": "rns.db", "indexada": False, "resultados": [],
+                 "error": ""}))
+        self.assertIn("python3 rns.py descargar", sin["limitaciones"][0])
+
+
+# Respuesta REAL de la CDX API de web.archive.org para
+# asistenciamisabuelos.com (capturada en vivo 2026-08-14, recortada):
+# formato JSON con cabecera en la primera fila.
+FIXTURE_CDX = [
+    ["timestamp", "original", "statuscode", "mimetype", "length"],
+    ["20150505002220", "http://www.asistenciamisabuelos.com:80/", "200",
+     "text/html", "3008"],
+    ["20160515135437", "http://asistenciamisabuelos.com/a1.jpg", "200",
+     "image/jpeg", "14836"],
+    ["20150505141501", "http://www.asistenciamisabuelos.com:80/actualidad.html",
+     "200", "text/html", "1917"],
+    ["20150505142831", "http://www.asistenciamisabuelos.com:80/contacto.html",
+     "200", "text/html", "2015"],
+    ["20160121131742", "http://asistenciamisabuelos.com/asi.jpg", "200",
+     "image/jpeg", "5075"],
+]
+
+
+class TestWayback(unittest.TestCase):
+
+    def test_parsear_cdx(self):
+        filas = _parsear_cdx(FIXTURE_CDX)
+        self.assertEqual(len(filas), 5)
+        self.assertEqual(filas[0]["timestamp"], "20150505002220")
+        self.assertEqual(filas[0]["original"],
+                         "http://www.asistenciamisabuelos.com:80/")
+        self.assertEqual(filas[0]["statuscode"], "200")
+
+    def test_parsear_cdx_vacio_o_malformado(self):
+        self.assertEqual(_parsear_cdx([]), [])
+        self.assertEqual(_parsear_cdx([["a", "b"]]), [])
+        self.assertEqual(_parsear_cdx(None), [])
+
+    def test_capturas_html_prioriza_home_y_contacto(self):
+        cdx = {"ok": True, "capturas": _parsear_cdx(FIXTURE_CDX)}
+        caps = _capturas_html(cdx, max_n=10)
+        # solo HTML (sin imagenes), con home y contacto primero
+        self.assertTrue(all("html" in c["mimetype"] for c in caps))
+        self.assertEqual(len(caps), 3)
+        import urllib.parse as _up
+        paths = [_up.urlsplit(c["original"]).path.rstrip("/") or "/"
+                 for c in caps]
+        self.assertIn("/", paths)
+        self.assertTrue(any("contacto.html" in p for p in paths))
+        # la home primero (prioridad 0), el contacto antes que otras paginas
+        self.assertEqual(paths[0], "/")
+
+    def test_capturas_html_limite_y_prioridad(self):
+        cdx = {"ok": True, "capturas": _parsear_cdx(FIXTURE_CDX)}
+        caps = _capturas_html(cdx, max_n=1)
+        self.assertEqual(len(caps), 1)
+        self.assertTrue(caps[0]["original"].endswith("/") or
+                        "contacto" in caps[0]["original"])
+
+    def test_sintesis_wayback_senal_y_cuits_historicos(self):
+        from empresas import _sintetizar
+        informe = {
+            "cuitonline": [], "sitio_oficial": None, "rdap": None,
+            "web_general": [], "correos_web": [],
+            "wayback": {"ok": True, "n": 5, "primera": "20150505002220",
+                        "ultima": "20160515135437"},
+            "wayback_capturas": [{
+                "timestamp": "20150505002220", "fecha": "2015-05-05",
+                "url": "http://www.asistenciamisabuelos.com:80/",
+                "cuits": ["30-12345678-9"],
+                "razon_social": "Asistencia Mis Abuelos S.R.L.",
+                "emails": []}],
+        }
+        sin = _sintetizar(informe)
+        self.assertIn({"cuit": "30-12345678-9", "razon_social": "",
+                       "fuente": "wayback (2015-05-05)"}, sin["cuits"])
+        self.assertTrue(any("historial en Wayback" in s
+                            for s in sin["senales_actividad"]))
 
 
 if __name__ == "__main__":

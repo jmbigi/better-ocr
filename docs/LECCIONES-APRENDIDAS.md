@@ -405,3 +405,45 @@
 **Hallazgo 7 — auditoría P0.9/P0.10 antes del commit:** el fixture de test contenía el NOMBRE REAL del titular de un CUIT (pegado de la tabla del usuario) y el documento de investigación legal de empleadores pertenece al proyecto de cuidados, no a better-ocr: se movió a su proyecto. Sanitizado a "TITULAR PERSONA FISICA" y referencias quitadas de AGENTS/README. Lección: los datos que el programador pega en el chat pueden ser personales; al entrar al repo se anonimizan o se descartan.
 
 **Lección:** una suite de búsqueda se construye pieza por pieza con verificación en vivo de cada fuente (P0.2), reportando lo no verificable en el propio informe (parser del BO, ficha de empresa), y antes del commit se auditan datos personales (nombres de titulares, sexo, rutas) aunque vengan del propio programador.
+
+## 33. RNS offline: el padrón oficial de personas jurídicas sin red (2026-08-14)
+
+**Contexto:** módulo nuevo `rns.py` (Registro Nacional de Sociedades OFFLINE) para el caso donde la búsqueda por nombre muere: los motores bloquean la IP (lección 20 hallazgo 8) o CuitOnline no indexa la empresa. Con el RNS la consulta es LOCAL (SQLite FTS5), sin red ni captchas.
+
+**Hallazgo 1 — el padrón de personas jurídicas SÍ existe como dataset oficial:** PRUEBAS §12 concluyó que "datos.gob.ar solo tiene agregados de empleadores"; el padrón completo (sociedades + asociaciones sin fines de lucro, Ley 26.047) vive en el portal del MINISTERIO DE JUSTICIA (`datos.jus.gob.ar`, API CKAN), con ZIPs anuales 2019-2026. URLs y descargas de prueba verificadas en vivo el 2026-08-14. No era "no integrable": estaba en otro portal.
+
+**Hallazgo 2 — formato real del CSV:** columnas `cuit, razon_social, tipo_societario, fecha_hora_contrato_social, numero_inscripcion, dom_fiscal_*, dom_legal_*` (22 comunes, idénticas en sociedades y asociaciones) más `actividad_*` SOLO en asociaciones; el CUIT se publica como 11 DÍGITOS SIN GUIONES ("30123456789"); el CSV de asociaciones repite filas por actividad y, para algunas entidades, trae una fila sin CUIT junto a otra con CUIT. Fix: normalización a `XX-XXXXXXXX-X`, dedup por identidad de la entidad (razón normalizada, tipo, fecha, localidad) y fusión priorizando la fila con CUIT.
+
+**Hallazgo 3 — FTS5 y el prefijo de 3 letras:** `unicode61 remove_diacritics` normaliza acentos en ambos lados (buscar "geriatricos" matchea "GERIÁTRICOS"); el prefijo `*` se usa solo con palabras de 4+ letras: "mis" con prefijo matchearía "misionera" (ruido real del dataset: 'ASISTENCIA MISIONERA').
+
+**Hallazgo 4 — descargas pesadas (P2.5):** los ZIP anuales pesan cientos de MB (sociedades 2026 ~897 MB; `--todos` 2019-2026 ~2.5 GB). El default baja solo sociedades+asociaciones 2026; la verificación de la lógica de búsqueda usa fixtures sintéticos con la CABECERA REAL del dataset, sin bajar 2.5 GB.
+
+**Verificación:** 12 tests nuevos (`tests/test_rns.py`: normalización, sufijos anclados al final, query FTS5, dedup por actividad, fusión sin CUIT, CUIT sin guiones, búsqueda exacta/prefijo/sin acentos/sin coincidencia/sin base) + 3 de integración en `tests/test_empresas.py` (síntesis con CUIT y señal "registrada en el RNS", limitación "NO consta", aviso de base no indexada con la instrucción) + E2E con el CSV real de asociaciones (150.624 entidades, lección 34/PRUEBAS §13-14). Suite total medida tras la corrida real: **340/340 tests**. La empresa demo del usuario (INTEGRAR CUIDADOS S.R.L., CUIT 30-12345678-9) forma parte del fixture.
+
+**Lección:** cuando una fuente web se cae o bloquea, buscar el dataset oficial descargable antes de pelear contra captchas; el formato real del dataset (CUIT sin guiones, filas por actividad, filas sin CUIT) solo se conoce leyendo los datos — los fixtures con la cabecera real lo fijan para los tests.
+
+## 34. Wayback Machine: el historial del sitio como fuente sin bloqueos (2026-08-14)
+
+**Contexto:** en el caso real "Asistencia Mis Abuelos" la búsqueda web murió (motores bloqueados, captcha no resuelto) y el sitio actual no publica CUIT ni razón social. La CDX API de web.archive.org respondió sin navegador ni captchas y reveló lo que la web actual oculta.
+
+**Hallazgo 1 — la CDX API es una fuente de señales gratuita y sin bloqueos:** `https://web.archive.org/cdx/search/cdx?url=dominio&output=json&fl=timestamp,original,statuscode,mimetype,length&filter=statuscode:200&collapse=urlkey` devuelve el historial de capturas en JSON. Con `url=dominio` (sin `/*`) solo trae la home (rápido, para señales); con `url=dominio/*` trae todo el sitio (para recuperar). Verificado en vivo: asistenciamisabuelos.com → 112 capturas 2015-2025, el sitio existe hace 10 años (señal de actividad que las bases de empresas no tienen).
+
+**Hallazgo 2 — las versiones viejas tienen lo que la web actual quitó:** la home de 2015 no tenía pie legal, pero `contacto.html` de 2015 expuso DOS correos (incluido uno con un segundo dominio de la marca "Mis Abuelos En Casa" que ninguna fuente actual conocía; correos no reproducidos, P0.9) y `single.html` de 2019 declaró la razón social "Asistencia Mis Abuelos". La recuperación usa `https://web.archive.org/web/{timestamp}id_/{original}` (el `id_` = contenido crudo sin el banner de archive.org, que rompería los extractores de HTML).
+
+**Hallazgo 3 — los agregadores de CUIT alternativos NO existen:** wikicuit.com no resuelve DNS, cuits.com es una charcutería, buscardatos/buscarcuit bloquean o fallan. Verificado en vivo el 2026-08-14. CuitOnline es el único agregador scrapeable; las fuentes muertas no se integran (P0.2). La vía oficiosa completa es: RNS (personas jurídicas) + CuitOnline + Boletín Oficial + Wayback + RDAP.
+
+**Hallazgo 4 — el RNS tiene filas sin CUIT junto a la misma entidad con CUIT:** se funden por identidad (razón normalizada, tipo, fecha de contrato, localidad) priorizando la fila con CUIT; el E2E real mostró el caso ("CENTRO DE JUBILADOS Y PENSIONADOS MIS ABUELOS", CUIT 30-98765432-2, una sola fila).
+
+**Verificación:** 5 tests de Wayback en `test_empresas.py` con fixture REAL de la respuesta CDX + E2E en vivo (112 capturas, 2 correos históricos, razón social histórica, integración en síntesis). Suite: 340/340.
+
+**Lección:** cuando la web actual está limpia de datos, el historial archivado es la fuente: los sitios viejos solían publicar pie legal con CUIT y correos de contacto reales.
+
+## 35. Captcha en buscador.py: cooldown + reload de última oportunidad (2026-08-14)
+
+**Contexto:** en el caso real el `--captcha` de `buscador.py` falló contra el reCAPTCHA de Google ("Google no resolvió el reCAPTCHA esta vez"). Revisión del orquestador (no del stack de captcha_web, que es el más medido del repo).
+
+**Hallazgo 1 — buscador.py iba a 2 intentos, captcha_web a 3:** alineado a 3 (`--max-intentos-captcha` default 3) con cooldown de 2 s entre intentos (el reto siguiente de reCAPTCHA se renderiza pasado un instante; reintentar al instante desperdicia intentos).
+
+**Hallazgo 2 — tras el fallo del reto, la recarga a veces limpia la sesión:** si los N intentos del reto fallan, se recarga la página y se re-evalúa si el ancla sigue: Google a veces deja pasar la sesión tras varios intentos + reload (sesión limpia). Es un fallback barato: no empeora el estado (ya era "captcha") y no toca captcha_web.py.
+
+**Lección:** las mejoras de captcha se hacen en el orquestador con cambios pequeños y medibles; el stack interno no se toca sin campaña de medición (lecciones 20-27: los cambios de config no mejoraron la tasa del 43%).

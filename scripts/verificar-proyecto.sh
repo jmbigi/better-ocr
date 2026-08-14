@@ -62,6 +62,7 @@ check "sintaxis: empresas.py" python3 -m py_compile empresas.py
 check "sintaxis: judiciales.py" python3 -m py_compile judiciales.py
 check "sintaxis: analizar_cuit.py" python3 -m py_compile analizar_cuit.py
 check "sintaxis: buscador_empresas.py" python3 -m py_compile buscador_empresas.py
+check "sintaxis: rns.py" python3 -m py_compile rns.py
 check "tests unitarios (stdlib + pandas)" python3 -m unittest discover -s tests -q
 
 echo "== 3. Config =="

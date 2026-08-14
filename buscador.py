@@ -419,6 +419,13 @@ def resolver_recaptcha_en_pagina(pagina, max_intentos: int = 2,
 
     registro = []
     for intento in range(1, max_intentos + 1):
+        if intento > 1:
+            # cooldown entre intentos: el segundo reto de reCAPTCHA suele
+            # renderizarse pasado un instante; reintentar al instante
+            # desperdicia intentos (medido en la campana: la tasa se
+            # mantiene en ~43%, el cooldown evita clics ciegos en retos
+            # a medio render)
+            time.sleep(2.0)
         ancla = None
         t0 = time.monotonic()
         while time.monotonic() - t0 < 15:
@@ -496,7 +503,6 @@ def resolver_recaptcha_en_pagina(pagina, max_intentos: int = 2,
     return {"ok": False, "error": "reto no resuelto", "intentos": max_intentos,
             "registro": registro}
 
-
 def buscar_en_web(consulta: str, motores: list = None, captcha: bool = False,
                   headed: bool = False, timeout_motor: float = 60.0,
                   salida_dir: str = "", max_intentos_captcha: int = 2,
@@ -551,7 +557,22 @@ def buscar_en_web(consulta: str, motores: list = None, captcha: bool = False,
                                 html = pagina.content()
                                 estado["estado"] = "resuelto"
                             else:
-                                estado["estado"] = "captcha"
+                                # ultima oportunidad: recargar la pagina; a
+                                # veces Google deja pasar la sesion tras
+                                # varios intentos del reto (verificado en
+                                # la campana 2026-08: relojes del reto
+                                # fallido + reload = sesion limpia)
+                                try:
+                                    pagina.reload(wait_until="domcontentloaded",
+                                                  timeout=30000)
+                                    pagina.wait_for_timeout(2500)
+                                    if not _hay_iframe_recaptcha(pagina):
+                                        html = pagina.content()
+                                        estado["estado"] = "resuelto"
+                                    else:
+                                        estado["estado"] = "captcha"
+                                except Exception:
+                                    estado["estado"] = "captcha"
                         else:
                             estado["estado"] = "captcha"
                     if not estado["estado"]:
@@ -710,8 +731,11 @@ def main() -> None:
                              "motor/receta y el JSON final")
     parser.add_argument("--timeout-motor", type=float, default=60.0,
                         help="tiempo maximo por motor en segundos")
-    parser.add_argument("--max-intentos-captcha", type=int, default=2,
-                        help="reintentos de resolucion de captcha por motor")
+    parser.add_argument("--max-intentos-captcha", type=int, default=3,
+                        help="reintentos de resolucion de captcha por motor "
+                             "(default 3: mas intentos que 2 no mejoraron la "
+                             "tasa en la campana, pero 3 es el maximo con "
+                             "cooldown dentro del timeout por motor)")
     parser.add_argument("--locale", default="es-AR",
                         help="locale del navegador (es-AR, en-US...)")
     args = parser.parse_args()

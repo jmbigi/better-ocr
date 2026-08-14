@@ -100,6 +100,116 @@ RE_LINK_CONTACTO = re.compile(
     r"contacto|contactanos|contactenos|contact us|escrib[ií]nos|consultas",
     re.I)
 
+# ---------------------------------------------------------------------------
+# Wayback Machine (web.archive.org): historial del sitio sin bloqueos
+# ---------------------------------------------------------------------------
+
+_CDX_BASE = "https://web.archive.org/cdx/search/cdx"
+_CDX_FL = "timestamp,original,statuscode,mimetype,length"
+
+
+def _parsear_cdx(respuesta: list) -> list:
+    """Convierte la respuesta JSON de la CDX API (lista con cabecera y
+    filas) a lista de dicts {timestamp, original, statuscode, mimetype,
+    length}. Puro y testeable: las filas malformadas se descartan."""
+    if not respuesta or not isinstance(respuesta, list) or len(respuesta) < 2:
+        return []
+    cabecera = [str(c).lower() for c in respuesta[0]]
+    filas = []
+    for f in respuesta[1:]:
+        if len(f) < len(cabecera):
+            continue
+        filas.append({cabecera[i]: f[i] for i in range(len(cabecera))})
+    return filas
+
+
+def consultar_cdx(dominio: str, recurso: bool = False,
+                  timeout_s: float = 25.0) -> dict:
+    """Consulta la CDX API de web.archive.org por el historial del dominio
+    (sin Playwright ni navegador; sin bloqueos, verificada en vivo el
+    2026-08-14). 'recurso=False' solo trae la HOME (rapido, para senales);
+    'recurso=True' trae todas las URL del sitio (para --wayback).
+
+    Se consulta el dominio con y sin 'www.' (en CDX son hosts distintos) y
+    se fusionan los resultados. Devuelve {"ok", "error", "capturas": [...],
+    "n", "primera", "ultima"}; las capturas solo statuscode 200."""
+    if not dominio:
+        return {"ok": False, "error": "sin dominio"}
+    base = dominio.lower().rstrip(".").replace("www.", "")
+    variantes = [base, f"www.{base}"]
+    filas = {}
+    for v in variantes:
+        url = (f"{_CDX_BASE}?url={urllib.parse.quote(v)}"
+               + (f"/*" if recurso else "")
+               + f"&output=json&fl={_CDX_FL}&filter=statuscode:200"
+                 "&collapse=urlkey")
+        try:
+            req = urllib.request.Request(url, headers={
+                "User-Agent": "better-ocr-empresas/wayback"})
+            with urllib.request.urlopen(req, timeout=timeout_s) as r:
+                datos = json.loads(r.read().decode())
+        except Exception as exc:
+            return {"ok": False,
+                    "error": f"{type(exc).__name__}: {str(exc)[:90]}"}
+        for fila in _parsear_cdx(datos):
+            filas[fila.get("timestamp", "") + "|" + fila.get("original", "")] = {
+                "timestamp": fila.get("timestamp", ""),
+                "original": fila.get("original", ""),
+                "statuscode": fila.get("statuscode", ""),
+                "mimetype": fila.get("mimetype", ""),
+                "length": fila.get("length", "")}
+    capturas = sorted(filas.values(), key=lambda c: c["timestamp"])
+    res = {"ok": True, "capturas": capturas, "n": len(capturas),
+           "primera": capturas[0]["timestamp"] if capturas else "",
+           "ultima": capturas[-1]["timestamp"] if capturas else ""}
+    return res
+
+
+def recuperar_captura(timestamp: str, original: str,
+                      timeout_s: float = 30.0, reintentos: int = 1) -> str:
+    """Descarga el HTML ORIGINAL de una captura de Wayback ('{ts}id_/' =
+    contenido crudo sin el banner de archive.org). '' si falla."""
+    url = f"https://web.archive.org/web/{timestamp}id_/{original}"
+    for _ in range(reintentos + 1):
+        try:
+            req = urllib.request.Request(url, headers={
+                "User-Agent": "better-ocr-empresas/wayback"})
+            with urllib.request.urlopen(req, timeout=timeout_s) as r:
+                return r.read().decode("utf-8", "replace")
+        except Exception:
+            time.sleep(2)
+    return ""
+
+
+def _capturas_html(cdx: dict, max_n: int = 10) -> list:
+    """Capturas de HTML del historial (sin imagenes ni archivos), priorizando
+    la home y las paginas de contacto, ordenadas de la mas antigua a la mas
+    reciente, hasta max_n."""
+    candidatas = [c for c in cdx.get("capturas", [])
+                  if "html" in (c.get("mimetype") or "")
+                  and c.get("original", "").split("?")[0].rstrip("/").endswith(
+                      ("/", ".html", ".php", ".htm", ""))]
+    if not candidatas:
+        return []
+
+    def prioridad(c: str) -> int:
+        p = urllib.parse.urlsplit(c["original"]).path.rstrip("/")
+        if p in ("", "/"):
+            return 0
+        if RE_LINK_CONTACTO.search(p):
+            return 1
+        return 2
+
+    por_url = {}
+    for c in sorted(candidatas, key=lambda c: c["timestamp"]):
+        clave = c["original"].split("?")[0].rstrip("/") or "/"
+        if clave not in por_url:
+            por_url[clave] = c
+        elif len(por_url[clave]["timestamp"]) > len(c["timestamp"]):
+            por_url[clave] = c
+    orden = sorted(por_url.values(), key=prioridad)
+    return [c for c in orden if prioridad(c) < 3][:max_n]
+
 
 def limpiar_sufijo_legal(nombre: str) -> str:
     """Quita el sufijo legal del FINAL del nombre ('Permanencia Salud Srl'
@@ -400,9 +510,11 @@ def buscar_empresa(nombre: str, sitio: str = "", motores: list = None,
                    captcha: bool = False, headed: bool = False,
                    salida_dir: str = "", locale: str = "es-AR",
                    con_juicios: bool = True, con_correos: bool = True,
-                   con_recomendadores: bool = True) -> dict:
+                   con_recomendadores: bool = True,
+                   con_rns: bool = True, rns_db: str = "",
+                   wayback: bool = False) -> dict:
     """Ciclo completo de verificacion de una empresa. Devuelve el informe
-    con secciones: variantes, cuitonline, dateas, sitio_oficial, rdap,
+    con secciones: variantes, cuitonline, dateas, rns, sitio_oficial, rdap,
     web_general, juicios, correos_web, recomendadores, sintesis. Cada paso
     es independiente."""
     from buscador import (buscar_en_web, buscar_recetas,
@@ -424,15 +536,41 @@ def buscar_empresa(nombre: str, sitio: str = "", motores: list = None,
         "fecha": time.strftime("%Y-%m-%dT%H:%M:%S"),
         "cuitonline": [],
         "dateas": None,
+        "rns": None,
         "sitio_oficial": None,
         "rdap": None,
         "rdap_candidatos": [],
+        "wayback": None,
+        "wayback_capturas": [],
         "web_general": [],
         "juicios": [],
         "correos_web": [],
         "recomendadores": [],
         "sintesis": {},
     }
+
+    # 0.5) RNS (Registro Nacional de Sociedades) OFFLINE: la base oficial
+    # de sociedades y asociaciones. Funciona SIN red ni captchas, pero
+    # requiere la base indexada local (rns.py descargar + indexar); sin
+    # ella, se reporta "no indexada" con la instruccion (no es error).
+    if con_rns:
+        try:
+            from rns import BASE_DB, buscar
+            db = rns_db or BASE_DB
+            informe["rns"] = {
+                "base": db,
+                "indexada": os.path.exists(db),
+                "resultados": buscar(db, nombre, limite=8) if os.path.exists(db)
+                else [],
+                "error": "",
+            }
+        except FileNotFoundError:
+            informe["rns"] = {"base": "", "indexada": False,
+                              "resultados": [], "error": "base no encontrada"}
+        except Exception as exc:
+            informe["rns"] = {"base": rns_db or BASE_DB, "indexada": True,
+                              "resultados": [],
+                              "error": f"{type(exc).__name__}: {str(exc)[:90]}"}
 
     # 1) CuitOnline con variantes + Dateas (via recetas de buscador.py).
     # La red de esta maquina es intermitente (leccion 20: ERR_NETWORK_CHANGED
@@ -501,6 +639,32 @@ def buscar_empresa(nombre: str, sitio: str = "", motores: list = None,
                 r["dominio"] = candidato
                 informe["rdap_candidatos"].append(r)
 
+    # 3c) Wayback Machine (web.archive.org): historial del dominio SIN
+    # navegador ni bloqueos (CDX verificada en vivo 2026-08-14). Senales:
+    # antiguedad y volumen de capturas. Con wayback=True, ademas recupera
+    # capturas historicas y les extrae CUIT/razon social/correos: muchas
+    # pymes quitaron el pie legal con CUIT de la web actual pero las
+    # versiones viejas archivadas lo tienen.
+    informe["wayback"] = {"ok": False, "error": "sin dominio"}
+    if dominio:
+        informe["wayback"] = consultar_cdx(dominio, recurso=wayback)
+        if wayback and informe["wayback"].get("ok"):
+            hallazgos = []
+            for cap in _capturas_html(informe["wayback"]):
+                html = recuperar_captura(cap["timestamp"], cap["original"])
+                if not html:
+                    continue
+                hallazgos.append({
+                    "timestamp": cap["timestamp"],
+                    "fecha": f"{cap['timestamp'][:4]}-{cap['timestamp'][4:6]}-"
+                             f"{cap['timestamp'][6:8]}",
+                    "url": cap["original"],
+                    "cuits": sorted(extraer_cuits_de_html(html)),
+                    "razon_social": extraer_razon_social_de_html(html),
+                    "emails": sorted(extraer_emails_de_html(html)),
+                })
+            informe["wayback_capturas"] = hallazgos
+
     # 4) Busqueda web general con la razon social
     informe["web_general"] = buscar_en_web(
         nombre, motores=motores, captcha=captcha, headed=headed,
@@ -564,6 +728,17 @@ def _sintetizar(informe: dict) -> dict:
         for c in informe["sitio_oficial"]["cuits"]:
             cuits.append({"cuit": c, "razon_social": "",
                           "fuente": "sitio oficial"})
+    rns = informe.get("rns") or {}
+    if rns.get("indexada"):
+        for r in rns.get("resultados", []):
+            if r.get("cuit"):
+                cuits.append({"cuit": r["cuit"],
+                              "razon_social": r["razon_social"],
+                              "fuente": "RNS"})
+    for cap in informe.get("wayback_capturas", []):
+        for c in cap.get("cuits", []):
+            cuits.append({"cuit": c, "razon_social": "",
+                          "fuente": f"wayback ({cap['fecha']})"})
     razon_social_sitio = ""
     if informe["sitio_oficial"]:
         razon_social_sitio = informe["sitio_oficial"].get("razon_social", "")
@@ -591,6 +766,18 @@ def _sintetizar(informe: dict) -> dict:
     if informe["cuitonline"] and any(
             e.get("resultados") for e in informe["cuitonline"]):
         senales.append("indexada en CuitOnline")
+    rns = informe.get("rns") or {}
+    if rns.get("indexada"):
+        if rns.get("resultados"):
+            senales.append("registrada en el RNS (sociedad o asociacion)")
+        else:
+            senales.append("NO consta en el RNS como sociedad ni asociacion")
+    elif rns.get("error"):
+        senales.append(f"RNS sin consultar ({rns['error']})")
+    wb = informe.get("wayback") or {}
+    if wb.get("ok") and wb.get("n"):
+        senales.append(f"web con historial en Wayback desde "
+                       f"{wb['primera'][:10]} ({wb['n']} capturas)")
     if informe["sitio_oficial"] and informe["sitio_oficial"].get("ok"):
         senales.append("web oficial activa")
     if informe["rdap"] and informe["rdap"].get("ok"):
@@ -606,7 +793,7 @@ def _sintetizar(informe: dict) -> dict:
     if recom:
         senales.append(f"{len(recom)} dork(s) con opiniones/resenas en buscadores")
 
-    return {
+    resultado = {
         "cuits": cuits,
         "razon_social_declarada_en_web": razon_social_sitio,
         "emails": emails,
@@ -630,6 +817,18 @@ def _sintetizar(informe: dict) -> dict:
             "verificada de terceros.",
         ],
     }
+    rns = informe.get("rns") or {}
+    if rns.get("indexada") and not rns.get("resultados"):
+        resultado["limitaciones"].insert(0,
+            "NO consta en el Registro Nacional de Sociedades (sociedades + "
+            "asociaciones civiles): si opera, lo hace como marca o "
+            "monotributista de persona fisica. El RNS no incluye "
+            "monotributistas ni personas fisicas.")
+    elif not rns.get("indexada"):
+        resultado["limitaciones"].insert(0,
+            "RNS no consultado: la base local no esta indexada (ejecutar "
+            "python3 rns.py descargar && python3 rns.py indexar).")
+    return resultado
 
 
 # ---------------------------------------------------------------------------
@@ -669,6 +868,24 @@ def _resumen_consola(informe: dict) -> None:
     if d:
         extra = f" ({d.get('bloqueo', '')})" if d.get("bloqueo") else ""
         print(f"  [{d['estado']}] {d['tiempo_s']}s{extra}")
+    print("\n== RNS (Registro Nacional de Sociedades, offline)")
+    r = informe.get("rns") or {}
+    if r.get("error"):
+        print(f"  error: {r['error'][:80]}")
+    elif not r.get("indexada"):
+        print(f"  base no indexada ({r.get('base', '?')}): ejecuta "
+              "python3 rns.py descargar && python3 rns.py indexar")
+    elif not r.get("resultados"):
+        print("  NO consta como sociedad ni asociacion civil (base indexada)")
+    else:
+        for x in r["resultados"]:
+            print(f"  {x['razon_social']} — CUIT {x['cuit'] or 'n/d'} "
+                  f"({x['tipo_societario'] or 'tipo n/d'})")
+            if x.get("fecha_contrato"):
+                print(f"    contrato social: {x['fecha_contrato']}")
+            if x.get("dom_localidad") or x.get("dom_provincia"):
+                print(f"    domicilio fiscal: {x['dom_localidad']}, "
+                      f"{x['dom_provincia']}".replace(" ,", ","))
     print("\n== Sitio oficial")
     s = informe["sitio_oficial"]
     if s:
@@ -699,6 +916,26 @@ def _resumen_consola(informe: dict) -> None:
         print(f"  candidato {rc['dominio']}: registrado "
               f"(creado {rc['creado'][:10]})")
         _imprimir_titular(rc)
+    print("\n== Wayback (historial del sitio, web.archive.org)")
+    wb = informe.get("wayback") or {}
+    if wb.get("ok"):
+        if wb.get("n"):
+            print(f"  {wb['n']} capturas, de {wb['primera'][:10]} a "
+                  f"{wb['ultima'][:10]}")
+        else:
+            print("  sin capturas (el dominio no esta archivado)")
+    else:
+        print(f"  {wb.get('error', 'sin consulta')[:80]}")
+    for cap in informe.get("wayback_capturas", []):
+        extras = []
+        if cap["cuits"]:
+            extras.append("CUIT " + ", ".join(cap["cuits"]))
+        if cap["razon_social"]:
+            extras.append(f"razon social '{cap['razon_social']}'")
+        if cap["emails"]:
+            extras.append("correos " + ", ".join(cap["emails"]))
+        detalle = "; ".join(extras) if extras else "sin CUIT/razon/correos"
+        print(f"  {cap['fecha']} {cap['url'][:50]} -> {detalle}")
     print("\n== Busqueda web general")
     for m in informe["web_general"]:
         extra = f" ({m.get('bloqueo', '')})" if m.get("bloqueo") else ""
@@ -768,6 +1005,17 @@ def main() -> None:
                         help="omitir los dorks de correos (mas rapido)")
     parser.add_argument("--sin-recomendadores", action="store_true",
                         help="omitir los dorks de opiniones/resenas")
+    parser.add_argument("--sin-rns", action="store_true",
+                        help="omitir la consulta offline del Registro "
+                             "Nacional de Sociedades")
+    parser.add_argument("--rns-db", default="",
+                        help="ruta de la base RNS indexada (default: rns.db "
+                             "del directorio actual)")
+    parser.add_argument("--wayback", action="store_true",
+                        help="recuperar capturas historicas del sitio desde "
+                             "web.archive.org y extraer CUIT/razon social/"
+                             "correos de versiones viejas (sin esta bandera "
+                             "solo se reportan senales de historial)")
     parser.add_argument("--locale", default="es-AR",
                         help="locale del navegador (es-AR, en-US...)")
     args = parser.parse_args()
@@ -778,7 +1026,9 @@ def main() -> None:
         captcha=args.captcha, headed=args.headed, salida_dir=args.salida,
         locale=args.locale, con_juicios=not args.sin_juicios,
         con_correos=not args.sin_correos,
-        con_recomendadores=not args.sin_recomendadores)
+        con_recomendadores=not args.sin_recomendadores,
+        con_rns=not args.sin_rns, rns_db=args.rns_db,
+        wayback=args.wayback)
 
     if args.salida:
         os.makedirs(args.salida, exist_ok=True)

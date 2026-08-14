@@ -13,3 +13,7 @@ ocr_texto_extraido.txt
 vision_salida_bruta.json
 vision_respuesta.txt
 ejemplos/planillas/
+
+# RNS offline (rns.py): base y datos descargados (~897 MB, no van al repo)
+rns.db
+datos-rns/

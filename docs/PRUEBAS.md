@@ -303,3 +303,37 @@ Detalles verificados:
 - Boletín Oficial: indexa por palabra → los resultados pueden ser ajenos a la empresa; el filtro de interés (frase completa o 2+ palabras con `\b`) lo acota; la fuente estuvo inaccesible desde esta IP el 12/8 y volvió el 13/8.
 - Ficha de empresa de CuitOnline: sin verificar (index degradado); la ficha de persona física y la de CUIL sí están verificadas.
 - El VLM de `analizar_cuit.py --vision` no se probó en vivo (requiere docbee/ollama, ~5 GB): la capa de reglas es la que manda.
+
+## 13. Registro Nacional de Sociedades offline (`rns.py` — 2026-08-14)
+
+**Qué es:** base oficial de personas jurídicas argentinas (Ley 26.047, Ministerio de Justicia, `datos.jus.gob.ar`): sociedades + asociaciones sin fines de lucro, descargable como ZIP anuales. `rns.py descargar | indexar | buscar | auto` → búsqueda por razón social LOCAL (SQLite FTS5), sin buscadores ni captchas. URLs del dataset y descargas de prueba verificadas en vivo el 2026-08-14 (declarado en el módulo, P0.2).
+
+**Evidencia de la suite (P0.1, corrida real 2026-08-14):**
+
+- `tests/test_rns.py` (12 tests) sobre fixtures con la CABECERA REAL del CSV (22 columnas comunes + `actividad_*` en asociaciones; filas sintéticas, sin red): normalización de razón social, sufijos legales anclados al final ("SA SALUD" no pierde su primera palabra), query FTS5 (prefijo `*` solo con palabras ≥4 letras: "mis" no matchea "misionera"), indexación + dedup por actividad (3 filas → 2 entidades), fusión de fila sin CUIT con la misma entidad, CUIT de 11 dígitos sin guiones → `XX-XXXXXXXX-X` (incluido el CUIT inválido → se guarda vacío), búsqueda exacta (coincidencia 2) / prefijo (1) / sin acentos ("geriatricos" → "GERIÁTRICOS") / sin coincidencia / base ausente (`FileNotFoundError` con la instrucción de creación).
+- `tests/test_empresas.py` (3 de integración RNS, paso 0.5): base indexada con resultados → CUIT con fuente "RNS" + señal "registrada en el RNS"; sin resultados → limitación "NO consta en el Registro Nacional de Sociedades"; base no indexada → aviso `python3 rns.py descargar` (no es error).
+- Suite completa tras la corrida real: **340/340 tests OK** (`python3 -m unittest discover -s tests`).
+- La empresa demo del usuario (INTEGRAR CUIDADOS S.R.L., CUIT 30-12345678-9) está en el fixture de sociedades: búsqueda exacta con CUIT normalizado (coincidencia 2).
+- **E2E con datos REALES (mismo día):** CSV oficial de asociaciones sin fines de lucro 20260731 (65 MB, 150.624 entidades) + muestreo real de sociedades (955): búsqueda "Asistencia Mis Abuelos" → **0 resultados** (coincide con la verificación manual del programador: no existe como sociedad ni asociación); "Mis Abuelos" → 3 centros de jubilados reales (San Juan 1996, Santa Fe 2002, Lomas de Zamora 2006) con CUITs normalizados y fusión de fila sin CUIT funcionando ("CENTRO DE JUBILADOS Y PENSIONADOS MIS ABUELOS" aparece UNA vez con CUIT 30-98765432-2).
+
+**Limitaciones:**
+- La descarga es pesada: sociedades 2026 ~897 MB; `--todos` (2019-2026) ~2.5 GB — avisar antes (P2.5). El default baja solo sociedades+asociaciones 2026.
+- Cubre personas JURÍDICAS (sociedades y asociaciones): un monotributista persona física NO estará en el RNS (limitación integrada en `empresas.py`).
+- Requiere red UNA vez (la descarga); la búsqueda posterior es local. La ausencia en el RNS NO prueba que la entidad no exista (puede no estar publicada o figurar con nombre distinto).
+
+**Nota (complementa §12):** el hallazgo "datos.gob.ar solo tiene agregados de empleadores" se refiere al portal general; el padrón de personas jurídicas vive en el portal del Ministerio de Justicia (`datos.jus.gob.ar`), dataset RNS de la Ley 26.047.
+
+## 14. Wayback Machine, RNS E2E real y mejoras de captcha (`empresas.py` + `buscador.py` — 2026-08-14)
+
+**Qué es:** (1) `empresas.py --wayback` consulta la CDX API de web.archive.org (sin navegador ni bloqueos) y recupera capturas históricas del sitio para extraer CUIT/razón social/correos de versiones viejas; (2) `buscador.py --captcha` ahora intenta 3 veces con cooldown y recarga de última oportunidad; (3) se verificó la no-existencia de agregadores de CUIT alternativos.
+
+**Evidencia en vivo (P0.1, 2026-08-14):**
+
+- **CDX API verificada:** `web.archive.org/cdx/search/cdx` responde sin bloqueos con `output=json&filter=statuscode:200&collapse=urlkey`. Para `asistenciamisabuelos.com`: 1 captura con `url=` (home) y **112 capturas** con `url=*/*` (2015-05-05 a 2025-01-21).
+- **Recuperación de capturas reales (--wayback sobre asistenciamisabuelos.com):** la home de 2015 no tenía pie legal, pero `contacto.html` (2015-05-05) expuso **2 correos históricos** (con un segundo dominio de la marca "Mis Abuelos En Casa" que ninguna fuente actual conocía; correos no reproducidos, P0.9) y `single.html` (2019-01-30) declaró la razón social **"Asistencia Mis Abuelos"** (marca sin sufijo legal). Se usó el formato `{ts}id_/{original}` (contenido crudo sin el banner de archive.org).
+- **RNS E2E real:** ver §13 (150.624 asociaciones + muestreo real; 0 resultados para "Asistencia Mis Abuelos", consistente con la verificación manual).
+- **Agregadores de CUIT alternativos: NO existen (verificado en vivo):** wikicuit.com no resuelve DNS; cuits.com es una charcutería española (title real "Cuit's | Charcutería y cocinados"); buscardatos.com y buscarcuit.com timeout/error de red; buscardatos devuelve página con "captcha/robot" en el HTML. CuitOnline sigue siendo el único agregador scrapeable. No se agregó ningún motor nuevo: las fuentes muertas no se integran (P0.2).
+- **buscador.py captcha:** `--max-intentos-captcha` default 2 → 3 (alineado con `captcha_web.resolver_web`), cooldown de 2 s entre intentos y, si el reto falla, reload de la página y re-evaluación del ancla (Google a veces deja pasar la sesión tras varios intentos + reload). Sin cambios en `captcha_web.py` (el stack más probado del repo; las lecciones 20-27 miden que los cambios de config no mejoran la tasa en vivo).
+- **Wayback CDX en `empresas.py` sin --wayback:** señales de historial gratuitas (n capturas, primera/última) integradas en `sintesis` ("web con historial en Wayback desde 2015-05-05 (112 capturas)").
+
+**Suite:** 12 tests `test_rns.py` + 8 nuevos en `test_empresas.py` (3 RNS + 5 Wayback: parser CDX con fixture REAL de la API, exclusión de imágenes, prioridad home/contacto, límite, síntesis). Total: **340/340 OK**.
