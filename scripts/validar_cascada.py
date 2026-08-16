@@ -8,8 +8,8 @@ Para cada PNG de ejemplos/test_charts/ con su CSV de referencia:
   3. Puntuación contra el CSV: etiquetas (columna 1) y valores numéricos.
 
 Uso:
-    /home/admin/venvs/paddle312/bin/python scripts/validar_cascada.py [--solo nombre.png]
-    /home/admin/venvs/paddle312/bin/python scripts/validar_cascada.py --con-fallback
+    python scripts/validar_cascada.py [--solo nombre.png]
+    python scripts/validar_cascada.py --con-fallback
 """
 
 import csv

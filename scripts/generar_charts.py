@@ -7,7 +7,7 @@ de referencia (label, valor1, valor2, ...) que sirve de ground truth.
 
 Motores usados: matplotlib, seaborn, plotly (export estático con kaleido).
 Ejecutar con el venv del proyecto (tienen instaladas las librerías):
-    /home/admin/venvs/paddle312/bin/python scripts/generar_charts.py
+    python scripts/generar_charts.py
 """
 
 import csv

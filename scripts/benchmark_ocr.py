@@ -31,7 +31,7 @@ Uso:
     python scripts/benchmark_ocr.py [--solo ocr_v6] [--imagen ejemplos/grafico_demo.png]
     python scripts/benchmark_ocr.py run --engine <nombre> --imagen <ruta>  (interno)
 
-Ejecutar con el venv del proyecto: /home/admin/venvs/paddle312/bin/python
+Ejecutar con el venv del proyecto: python
 """
 
 import json

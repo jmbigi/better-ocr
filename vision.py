@@ -11,7 +11,7 @@ Modos:
   humano   : alias de objetos filtrando la clase 'person'
 
 Uso:
-  /home/admin/venvs/paddle312/bin/python vision.py imagen.png [--modo auto|texto|graficos|doc|objetos|humano] [--salida json|csv|md] [--con-fallback]
+  python vision.py imagen.png [--modo auto|texto|graficos|doc|objetos|humano] [--salida json|csv|md] [--con-fallback]
 
 La clasificación (clasificar) es pura y testeable sin modelos.
 """
