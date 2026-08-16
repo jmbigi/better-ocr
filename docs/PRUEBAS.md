@@ -417,3 +417,15 @@ Detalles verificados:
 - Verificación manual con imágenes sintéticas: donut (hueco 240x140 → densidad 0.652 → donut), barras-h (4 rects base x=80), dark barras-v (5 rects claros sobre #1e1e1e → `modo_oscuro: true`), dark barras-h, dark línea recta → `linea`; pastel sólido (densidad 0.827 → no donut); demo en claro intacta (barras + leyenda derecha).
 - Límite conocido: una línea en zigzag se fragmenta en blobs de < 50% del ancho y no clasifica como `linea` (pre-existente, geometría, no dark-mode).
 - Verificador: 39 OK, 2 FALLOS pre-existentes (árbol sucio, rutas `/home/<usuario>/` en docs).
+
+## 16.4 Purga del historial: CUITs reales fuera del repo (2026-08-16)
+
+**Qué es:** el agente security-auditor detectó CUITs reales versionados (uno de persona física, `27-12345678-9`, + empresa demo + jurídicas públicas) en un repo PÚBLICO. Se anonimizó el working tree (commit de CUITs → placeholders sintéticos `XX-12345678-9`/`30-98765432-X`) y se purgó el historial completo con `git filter-repo --replace-text` (3 pasadas: 8 valores con/sin guiones + handle NIC.AR `27123456789` + formas sin guiones `20123456789`/`30123456789`).
+
+**Evidencia (P0.1):**
+- Tras la purga, `git log --all -S` = 0 para los 9 valores reales; force-push a GitHub y Codeberg; HEAD final `9845222`.
+- **Check permanente nuevo en `scripts/verificar-proyecto.sh`:** escanea el historial COMPLETO de git (blobs de `git rev-list --all --objects`) buscando CUITs con prefijo válido (20/23/24/25/26/27/30/33/34, con/sin guiones), permitiendo placeholders sintéticos (dígitos triviales/repetidos) y exclusiones documentadas (números NASA/RNG/constantes). Verificador: **41 OK, 0 FALLOS**.
+- Tests: **401/401 OK** (los fixtures de test que usaban CUITs reales ahora usan placeholders y las 2 formas sin guiones normalizadas en test_rns siguen verificando).
+- Backup pre-purga: `/var/tmp/better-ocr-backup-20260816.bundle`.
+
+**Lecciones (P1.20, lección 41):** el working tree y los cambios sin commitear se pierden con filter-repo (commitear antes); el archivo de reemplazos debe cubrir formas con y sin guiones; los remotes se re-añaden y se force-pushea a todos; un CUIT real se distingue del placeholder por tener dígitos no triviales.

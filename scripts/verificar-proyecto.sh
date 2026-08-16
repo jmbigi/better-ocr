@@ -191,6 +191,61 @@ for root, dirs, files in os.walk('.'):
                     faltas.append((ruta, i, 'IP: ' + m))
 assert not faltas, faltas
 "
+# El historial completo de git se escanea en busca de CUITs REALES (11 digitos con
+# prefijo valido 20/23/24/25/26/27/30/33/34, con o sin guiones). Se permiten los
+# placeholders sinteticos documentados (purga P0.9/P0.10 2026-08-16, leccion 41):
+# XX-12345678-9, 27-98765432-1, 30-98765432-{1,2,3}, 30-88888888-8, 30-99999999-9,
+# 20-55555555-5, 20-45000000-9, 20-30111222-3, 27-71234567-8, 30-71234567-8,
+# 30-50000000-1, 30-50000012-7 y sus formas sin guiones. Un CUIT real es un
+# numero con digitos no triviales (un placeholder usa digitos repetidos/triviales).
+check "sin CUITs reales en el historial git (working tree + commits antiguos)" python3 -c "
+import re, subprocess
+sin_guiones = re.compile(r'(?<!\d)(20|23|24|25|26|27|30|33|34)([0-9]{8})([0-9])(?!\d)')
+con_guiones = re.compile(r'(?<!\d)(20|23|24|25|26|27|30|33|34)-([0-9]{8})-([0-9])(?!\d)')
+placeholder_ok = {
+    '27-12345678-9', '30-12345678-9', '20-12345678-9', '33-12345678-9',
+    '34-12345678-9', '26-12345678-9', '25-12345678-9', '24-12345678-9',
+    '23-12345678-9', '27-98765432-1', '30-98765432-1', '30-98765432-2',
+    '30-98765432-3', '30-88888888-8', '30-99999999-9', '20-55555555-5',
+    '20-45000000-9', '20-30111222-3', '27-71234567-8', '30-71234567-8',
+    '30-50000000-1', '30-50000012-7',
+    '27123456789', '30123456789', '20123456789', '33123456789', '34123456789',
+    '26123456789', '25123456789', '24123456789', '23123456789',
+    '27987654321', '30987654321', '30987654322', '30987654323',
+    '30888888888', '30999999999', '20555555555', '20450000009',
+    '20301112223', '27712345678', '30500000001', '30123456789',
+}
+# excepciones: numeros de publicacion (NASA NTRS), seeds de RNG, constantes
+excluir = re.compile(r'(20100031199|23495984827|33522128640|25430904614|'
+                     r'26128449941|27099609375|20836619120)')
+def trivial(num):
+    # digitos repetidos/triviales: no es un CUIT real
+    return len(set(num)) <= 2 or re.fullmatch(r'(\\d)\\1{10}', num)
+for linea in subprocess.check_output(
+        ['git', 'rev-list', '--all', '--objects']).splitlines():
+    partes = linea.split()
+    if not partes:
+        continue
+    blob = partes[0]
+    try:
+        datos = subprocess.check_output(['git', 'cat-file', 'blob', blob])
+    except subprocess.CalledProcessError:
+        continue
+    texto = datos.decode('utf-8', errors='ignore')
+    if excluir.search(texto):
+        continue
+    for m in con_guiones.finditer(texto):
+        g = m.group(0)
+        if g in placeholder_ok or trivial(m.group(2)):
+            continue
+        raise AssertionError('posible CUIT real (con guiones) en el historial: ' + g + ' (blob ' + blob.decode() + ')')
+    for m in sin_guiones.finditer(texto):
+        dig = m.group(0)
+        g = '%s-%s-%s' % (m.group(1), m.group(2), m.group(3))
+        if g in placeholder_ok or dig in placeholder_ok or trivial(m.group(2)):
+            continue
+        raise AssertionError('posible CUIT real (sin guiones) en el historial: ' + g + ' (blob ' + blob.decode() + ')')
+"
 check "sin emails personales en archivos" bash -c "! grep -rnE --exclude-dir=.venv --exclude-dir=node_modules '[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\\.[A-Za-z]{2,}' --include='*.md' --include='*.json' --include='*.sh' . | grep -v '\\.git/' | grep -qvE '(youremail@example|creativecommons|dummy@example)'"
 check "sin formatos de claves API en archivos" bash -c "! grep -rnE --exclude-dir=.venv --exclude-dir=node_modules '(sk-[A-Za-z0-9]{20,}|ghp_[A-Za-z0-9]{36,}|AKIA[0-9A-Z]{16}|AIza[0-9A-Za-z_-]{20,}|xox[baprs]-[0-9A-Za-z-]{10,}|-----BEGIN [A-Z ]*PRIVATE KEY-----)' --include='*.md' --include='*.json' --include='*.sh' . | grep -v '\\.git/'"
 # Los unicos 'eval'/'exec' en scripts son: la VARIANTE de prueba del deny 'eval *' en

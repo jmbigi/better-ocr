@@ -543,3 +543,19 @@
 **Verificación:** 5 tests nuevos (58/58 del módulo, 401/401 totales); demo en claro intacta; dark+linea recta → `linea`; dark+barras-h → `barras horizontal`. Verificador 39 OK (2 FALLOS pre-existentes ajenos).
 
 **Lección:** una señal única por clase de gráfico (p. ej. "bases iguales") no cubre las variantes de orientación; el modo oscuro no es un caso aparte sino que INVARÍA la relación tinta/fondo: hay que detectar el fondo primero (color modal, no media) y adaptar el umbral y el signo del contraste. Los casos límite (donut casi sólido, zigzag) deben documentarse como límites conocidos, no silenciarse.
+
+## 41. Purga del historial: CUITs reales eliminados con git-filter-repo (2026-08-16)
+
+**Contexto:** la auditoría de seguridad (agente security-auditor) detectó CUITs reales versionados, incluido el de una persona física (`27-12345678-9`) expuesto en un repo público. Se reemplazaron en el working tree (commit `9307d0a` de anonimización) y luego se Purgó el historial completo.
+
+**Hallazgo 1 — reemplazar en el working tree NO basta: los datos siguen en el historial.** Tras anonimizar el árbol, `git log -S <cuit>` seguía encontrándolo en commits antiguos. Fix: `git filter-repo --replace-text <archivo>` con los 8 valores (con y sin guiones, p. ej. `30987654322`) + el handle NIC.AR de persona física (`27123456789`, que es el CUIT sin guiones). `git-filter-repo` es la herramienta correcta (P0.11 prohíbe `filter-branch` manual).
+
+**Hallazgo 2 — las formas SIN guiones del CUIT (formato del dataset RNS) no las cubre el reemplazo con guiones.** `20-12345678-9` se reemplazaba pero `20123456789` (URL de CuitOnline en tests) no. Fix: añadir cada forma al archivo de reemplazos y re-ejecutar (idempotente). Verificación: `git log --all -S` = 0 para los 9 valores.
+
+**Hallazgo 3 — git-filter-repo BORRA el working tree y los cambios sin commitear** (reescribe y hace checkout del nuevo HEAD) y elimina los remotes y el reflog. Lección doble: (a) el archivo de reemplazos y cualquier edición local NO commiteada se pierden — commitear antes o guardar el archivo fuera del repo (se perdió el check de CUITs que estaba sin commitear y hubo que re-aplicarlo); (b) tras cada pasada hay que re-añadir `origin`/remotes y force-push a todos.
+
+**Hallazgo 4 — un CUIT real es un número con dígitos NO triviales.** Los placeholders sintéticos (`XX-12345678-9`, `30-88888888-8`, dígitos repetidos) deben permitirse en el check automático; la heurística `len(set(dig)) <= 2` o patrón repetido distingue placeholder de real.
+
+**Verificación:** tras 3 pasadas de filter-repo, `git log --all -S` = 0 en los 9 valores reales; force-push a GitHub (público) y Codeberg; verificador 41 OK, 0 FALLOS. Backup pre-purga en `/var/tmp/better-ocr-backup-20260816.bundle`. Resta avisar al titular (P0.9) y re-clonar copias locales (hashes reescritos).
+
+**Lección:** la purga del historial es una operación global e irreversible: backup previo obligatorio, planificar TODOS los reemplazos (con y sin guiones) antes de empezar, no dejar cambios sin commitear en el working tree, y verificar con `git log --all -S` + un check automático permanente que escanee el historial completo (verificar-proyecto.sh).
