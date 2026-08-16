@@ -4,10 +4,12 @@
 Dos capas complementarias (patrón de revision.py):
 
   1. Determinista (PIL + numpy, sin modelos): detecta superposiciones de
-     etiquetas, problemas de leyenda (ausente, cortada, sobre los datos),
-     recortes/zoom excesivo, falta de nitidez, bajo contraste, ruido, baja
-     resolución, y describe el tipo de gráfico y el número de series por
-     colores de tinta.
+     etiquetas, audita la leyenda y describe TODOS sus elementos (posición,
+     caja, entradas con marcador de color y etiqueta de texto, título;
+     ausente con series, cortada, sobre los datos, entradas sin marcador,
+     conteo vs series, colores sin correspondencia), recortes/zoom excesivo,
+     falta de nitidez, bajo contraste, ruido, baja resolución, y describe el
+     tipo de gráfico y el número de series por colores de tinta.
   2. Visión IA opt-in (--vision docbee|ollama): descripción e interpretación
      semántica (variables, tendencias, valores) + rúbrica de problemas.
 
@@ -28,7 +30,16 @@ import sys
 from collections import deque
 
 import numpy as np
-from PIL import Image, ImageDraw, ImageFilter
+from PIL import Image, ImageDraw, ImageFilter, ImageFont
+
+
+def _fuente_demo(tamano: int = 16):
+    """Fuente TTF del sistema para la demo (fallback: bitmap default de PIL)."""
+    try:
+        return ImageFont.truetype(
+            "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf", tamano)
+    except OSError:
+        return ImageFont.load_default()
 
 
 # ---------------------------------------------------------------------------
@@ -49,9 +60,26 @@ def _cargar(imagen) -> tuple:
     return img, gris, rgb
 
 
-def _tinta(gris: np.ndarray, umbral: float = 200.0) -> np.ndarray:
-    """Máscara booleana de tinta: píxeles oscuros (texto/líneas/barras)."""
+def _tinta(gris: np.ndarray, umbral: float = 200.0,
+           invertir: bool = False) -> np.ndarray:
+    """Máscara booleana de tinta: píxeles que se distinguen del fondo.
+
+    En modo claro (default) es tinta oscura (gris < umbral); con invertir=True
+    (fondo oscuro, dark-mode) es tinta clara (gris > 255 - umbral), porque
+    los datos y el texto son claros sobre el fondo oscuro.
+    """
+    if invertir:
+        return gris > 255 - umbral
     return gris < umbral
+
+
+def _es_modo_oscuro(rgb: np.ndarray) -> bool:
+    """True si el fondo modal de la imagen es oscuro (dark-mode).
+
+    Usa la luminancia relativa W3C del color modal: si el fondo es oscuro
+    (< 0.5), la máscara de tinta debe invertirse (los datos son claros).
+    """
+    return _luminancia_w3c(_color_fondo(rgb)) < 0.5
 
 
 def _integral(mascara: np.ndarray) -> np.ndarray:
@@ -278,13 +306,19 @@ def _mascara_texto(mascara: np.ndarray) -> np.ndarray:
     superposición (proportional ink: un rectángulo relleno es el dato).
     Los glifos engrosados también son "sólidos locales" pero pequeños: el
     filtro exige componentes sólidos de tamaño significativo (>= 0.1% del
-    lienzo), como una barra o un área rellena.
+    lienzo), como una barra o un área rellena. Los marcadores de leyenda
+    (swatches ~10-20 px, densidad ~1.0 y proporciones cuadradas) tampoco
+    son texto: se excluyen por su forma aunque no lleguen a ese tamaño.
     """
     solido = _mascara_solidos(mascara)
     excluir = np.zeros_like(mascara)
     area_img = mascara.shape[0] * mascara.shape[1]
     for b in _componentes(solido):
         if b["area"] >= 0.001 * area_img:
+            excluir[b["y"]:b["y"] + b["h"], b["x"]:b["x"] + b["w"]] = True
+            continue
+        # swatch de leyenda: sólido pequeño con proporciones casi cuadradas
+        if b["h"] > 0 and 0.8 <= b["w"] / b["h"] <= 1.25:
             excluir[b["y"]:b["y"] + b["h"], b["x"]:b["x"] + b["w"]] = True
     return mascara & ~excluir
 
@@ -343,11 +377,15 @@ def _blobs_texto(blobs, ancho, alto) -> list:
 
     El texto de los ejes/leyendas suele ocupar entre 0.03% y 3% del lienzo;
     por debajo del mínimo son ruido o glifos ilegibles, por encima son
-    bloques (barras, cajas).
+    bloques (barras, cajas). Se excluyen los casi sólidos (densidad >= 0.85):
+    son rectángulos rellenos (marcadores de color, puntos gruesos), no
+    glifos — un glifo bitmap real no pasa del ~60%.
     """
     area_img = ancho * alto
     texto = []
     for b in blobs:
+        if b.get("densidad", 0) >= 0.85:
+            continue
         if not (0.00006 * area_img <= b["area"] <= 0.03 * area_img):
             continue
         if b["h"] <= 0 or b["w"] <= 0:
@@ -358,18 +396,31 @@ def _blobs_texto(blobs, ancho, alto) -> list:
     return texto
 
 
-def check_leyenda(gris, mascara, blobs, ancho, alto, series) -> list:
-    """Leyenda: ausente con series, cortada por el borde o sobre los datos."""
-    hallazgos = []
-    texto = _blobs_texto(blobs, ancho, alto)
-    # agrupar blobs de texto por proximidad (gap <= 2x la altura del mayor)
+def _grupos_texto(texto: list) -> list:
+    """Agrupa blobs de texto por proximidad (gap <= 2x la altura del blob
+    entrante, NO del grupo: el grupo crece y su expansión "puentea").
+
+    Se excluyen los blobs de densidad muy baja (recuadros/outlines ~4% y
+    ejes ~13%): no son etiquetas y, por ser alargados y altos, "puentean"
+    distancias y fusionarían grupos separados en uno gigante.
+
+    Además de la proximidad genérica, se agrupan textos APILADOS con solape
+    horizontal (misma columna) y gap vertical <= 4x la altura del menor:
+    es el espaciado típico de las entradas de una leyenda (~1.5x línea).
+    """
+    candidatos = [t for t in texto if t.get("densidad", 0) >= 0.15]
     grupos = []
-    for t in texto:
+    for t in candidatos:
         mejor = None
         for g in grupos:
-            if _interseccion({"x": g["x"] - 4 * g["h"], "y": g["y"] - 2 * g["h"],
-                              "w": g["w"] + 8 * g["h"], "h": g["h"] + 4 * g["h"]},
+            if _interseccion({"x": g["x"] - 4 * t["h"], "y": g["y"] - 2 * t["h"],
+                              "w": g["w"] + 8 * t["h"], "h": g["h"] + 4 * t["h"]},
                              t) > 0:
+                mejor = g
+                break
+            # apilados en la misma columna con separación de línea de leyenda
+            if (t["x"] < g["x"] + g["w"] and g["x"] < t["x"] + t["w"]
+                    and abs(t["y"] - (g["y"] + g["h"])) <= 4 * min(g["h"], t["h"])):
                 mejor = g
                 break
         if mejor is None:
@@ -382,18 +433,270 @@ def check_leyenda(gris, mascara, blobs, ancho, alto, series) -> list:
             mejor["w"] = x2 - mejor["x"]
             mejor["h"] = y2 - mejor["y"]
             mejor["area"] += t["area"]
-    # candidatos a leyenda: grupos de >= 2 elementos en el perímetro (20%)
-    margen_x = 0.2 * ancho
-    margen_y = 0.2 * alto
+    return grupos
+
+
+def _candidatas_leyenda(grupos: list, ancho: int, alto: int) -> list:
+    """Grupos de texto en el perímetro EXTERIOR (margen 12%) con área de una
+    entrada mínima. El margen es más estricto que el genérico (20%): las
+    etiquetas de valores cerca de los bordes (p. ej. una etiqueta encima de
+    la última barra) no son leyenda, pero una leyenda sí está pegada al
+    borde de la imagen."""
+    margen_x = 0.12 * ancho
+    margen_y = 0.12 * alto
     candidatas = []
     for g in grupos:
-        if g["area"] < 2 * (0.00025 * ancho * alto):
+        if g["area"] < 0.00015 * ancho * alto:
             continue
         perimetral = (g["x"] <= margen_x or g["x"] + g["w"] >= ancho - margen_x
                       or g["y"] <= margen_y or g["y"] + g["h"] >= alto - margen_y)
         if perimetral:
             candidatas.append(g)
+    return candidatas
+
+
+def _posicion_leyenda(caja: dict, ancho: int, alto: int) -> str:
+    """Posición de la caja de la leyenda: derecha/izquierda/arriba/abajo/interior."""
+    cx = caja["x"] + caja["w"] / 2
+    cy = caja["y"] + caja["h"] / 2
+    if cx >= 0.6 * ancho:
+        return "derecha"
+    if cx <= 0.4 * ancho:
+        return "izquierda"
+    if cy >= 0.6 * alto:
+        return "abajo"
+    if cy <= 0.4 * alto:
+        return "arriba"
+    return "interior"
+
+
+def _color_dominante(rgb: np.ndarray, x: int, y: int, w: int, h: int) -> str:
+    """Hex cuantizado (bins de 32, como _colores_series) del color más frecuente."""
+    r = rgb[y:y + h, x:x + w]
+    if r.size == 0:
+        return "#000000"
+    q = (r.reshape(-1, 3) // 32).astype(int)
+    claves = q[:, 0] * 1024 + q[:, 1] * 32 + q[:, 2]
+    k = int(np.bincount(claves, minlength=32768).argmax())
+    return "#%02x%02x%02x" % ((k // 1024) * 32, (k // 32 % 32) * 32, (k % 32) * 32)
+
+
+def _swatches_en(rgb: np.ndarray, region: dict, ancho: int, alto: int) -> list:
+    """Marcadores de color (swatches) dentro de una región expandida.
+
+    Un marcador típico de leyenda es un rectángulo pequeño de color saturado
+    (10-40 px de lado). Se detectan como componentes de la máscara de
+    saturación con área moderada y proporciones de marcador; el texto de la
+    etiqueta es gris/negro (no saturado) y queda fuera. La región se expande
+    porque el marcador suele quedar a la IZQUIERDA del texto, fuera de la caja
+    de tinta del grupo de etiquetas.
+    """
+    H, W = rgb.shape[:2]
+    x0 = max(0, region["x"]); y0 = max(0, region["y"])
+    x1 = min(W, region["x"] + region["w"]); y1 = min(H, region["y"] + region["h"])
+    if x1 - x0 < 4 or y1 - y0 < 4:
+        return []
+    sub = rgb[y0:y1, x0:x1].astype(int)
+    r, g, b = sub[:, :, 0], sub[:, :, 1], sub[:, :, 2]
+    sat = (np.maximum(r, np.maximum(g, b)) - np.minimum(r, np.minimum(g, b))) > 60
+    area_img = ancho * alto
+    swatches = []
+    for blob in _componentes(sat):
+        if not (0.00015 * area_img <= blob["area"] <= 0.02 * area_img):
+            continue
+        if blob["h"] <= 0 or blob["w"] / blob["h"] > 6:
+            continue
+        if blob["w"] > 0.7 * (x1 - x0) or blob["h"] > 0.7 * (y1 - y0):
+            continue
+        sx = blob["x"] + x0
+        sy = blob["y"] + y0
+        swatches.append({
+            "x": sx, "y": sy, "w": blob["w"], "h": blob["h"],
+            "area": blob["area"],
+            "color": _color_dominante(rgb, sx, sy, blob["w"], blob["h"]),
+        })
+    return swatches
+
+
+def _fusionar_lineas(blobs: list) -> list:
+    """Une glifos del mismo renglón en líneas de texto.
+
+    El anti-aliasing de las fuentes reales deja píxeles grises entre letras
+    que no pasan el umbral de tinta: cada glifo es un blob separado. Se
+    fusionan los blobs con centro-y coincidente y gap horizontal pequeño,
+    iterando hasta convergencia (el orden de los glifos puede dejar
+    huecos intermedios que se cierran al crecer la línea).
+    """
+    lineas = [dict(b) for b in blobs]
+    cambio = True
+    while cambio:
+        cambio = False
+        lineas.sort(key=lambda l: (l["y"], l["x"]))
+        i = 0
+        while i < len(lineas):
+            a = lineas[i]
+            j = i + 1
+            while j < len(lineas):
+                b = lineas[j]
+                dy = abs((a["y"] + a["h"] / 2) - (b["y"] + b["h"] / 2))
+                if dy <= max(a["h"], b["h"]):
+                    gap = b["x"] - (a["x"] + a["w"])
+                    if gap <= 2 * max(a["h"], b["h"]):
+                        x2 = max(a["x"] + a["w"], b["x"] + b["w"])
+                        y2 = max(a["y"] + a["h"], b["y"] + b["h"])
+                        a["x"] = min(a["x"], b["x"])
+                        a["y"] = min(a["y"], b["y"])
+                        a["w"] = x2 - a["x"]
+                        a["h"] = y2 - a["y"]
+                        a["area"] += b["area"]
+                        lineas.pop(j)
+                        cambio = True
+                        continue
+                j += 1
+            i += 1
+    return lineas
+
+
+def _entradas_leyenda(texto: list, caja: dict, swatches: list) -> tuple:
+    """Empareja marcadores de color con sus etiquetas de texto dentro de la caja.
+
+    Devuelve (entradas, titulo). Cada entrada es
+    {"color", "marcador" (bbox o None), "texto" (bbox)}. Los blobs de texto
+    sin marcador son entradas sin color, salvo el más alto y centrado que
+    se considera el título de la leyenda (si hay entradas con marcador).
+    """
+    # el recuadro que rodea la leyenda (outline) es un blob de densidad muy
+    # baja (~4%): los glifos reales superan el 15%; así no cuenta como entrada
+    dentro = [t for t in texto if _centro_en(t, caja) and t.get("densidad", 0) >= 0.15]
+    # el anti-aliasing fragmenta el texto en glifos: se fusionan por renglón
+    dentro = _fusionar_lineas(dentro)
+    entradas = []
+    usados = set()
+    for s in swatches:
+        mejor = None
+        for i, t in enumerate(dentro):
+            if i in usados:
+                continue
+            sy = s["y"] + s["h"] / 2
+            ty = t["y"] + t["h"] / 2
+            if abs(ty - sy) > max(t["h"], s["h"]) * 1.5:
+                continue
+            if t["x"] < s["x"] + s["w"]:
+                continue
+            if mejor is None or t["x"] < mejor[0]["x"]:
+                mejor = (t, i)
+        if mejor is None:
+            continue
+        t, i = mejor
+        usados.add(i)
+        entradas.append({
+            "color": s["color"],
+            "marcador": [s["x"], s["y"], s["w"], s["h"]],
+            "texto": [t["x"], t["y"], t["w"], t["h"]],
+        })
+    sin_marcador = [t for i, t in enumerate(dentro) if i not in usados]
+    titulo = None
+    if entradas and sin_marcador:
+        caja_cx = caja["x"] + caja["w"] / 2
+        primer_entrada_y = min(e["texto"][1] for e in entradas)
+        # el título es la línea (o líneas) por encima de la primera entrada,
+        # centrada respecto a la caja; se une si quedó fragmentada en blobs
+        arriba = [t for t in sin_marcador
+                  if t["y"] + t["h"] <= primer_entrada_y
+                  and abs(t["x"] + t["w"] / 2 - caja_cx) <= 0.3 * caja["w"]]
+        if arriba:
+            x0 = min(t["x"] for t in arriba)
+            y0 = min(t["y"] for t in arriba)
+            x1 = max(t["x"] + t["w"] for t in arriba)
+            y1 = max(t["y"] + t["h"] for t in arriba)
+            titulo = [x0, y0, x1 - x0, y1 - y0]
+            sin_marcador = [t for t in sin_marcador if t not in arriba]
+    for t in sin_marcador:
+        entradas.append({"color": None, "marcador": None,
+                         "texto": [t["x"], t["y"], t["w"], t["h"]]})
+    entradas.sort(key=lambda e: e["texto"][1])
+    return entradas, titulo
+
+
+def _centro_en(t: dict, caja: dict) -> bool:
+    cx = t["x"] + t["w"] / 2
+    cy = t["y"] + t["h"] / 2
+    return (caja["x"] <= cx <= caja["x"] + caja["w"]
+            and caja["y"] <= cy <= caja["y"] + caja["h"])
+
+
+def _seleccionar_leyenda(candidatas: list, texto: list, rgb: np.ndarray,
+                         ancho: int, alto: int) -> tuple | None:
+    """Elige la candidata más probable a ser leyenda (caja, swatches, n_blobs).
+
+    Reglas (heurísticas, se reportan como estimación):
+    - se descartan cajas que cubren > 30% del lienzo (grupo gigante: el eje
+      con sus etiquetas no es una leyenda) o con proporciones de panel
+      (w > 30% del ancho o h > 30% del alto: una fila de barras del grid no
+      es una entrada de leyenda);
+    - se priorizan candidatas con marcadores de color (más marcadores y
+      caja más compacta);
+    - sin marcadores, la más compacta con >= 2 blobs de texto (una leyenda
+      de texto plano; un título de grid es un solo blob y no llega).
+    """
+    area_lienzo = ancho * alto
+    evaluadas = []
+    for caja in candidatas:
+        if caja["w"] * caja["h"] > 0.3 * area_lienzo:
+            continue
+        if caja["w"] > 0.3 * ancho or caja["h"] > 0.3 * alto:
+            continue
+        alturas = [t["h"] for t in texto if _centro_en(t, caja)]
+        pad = max(8, int(1.5 * (np.median(alturas) if alturas else caja["h"])))
+        region = {"x": caja["x"] - pad, "y": caja["y"] - pad,
+                  "w": caja["w"] + 2 * pad, "h": caja["h"] + 2 * pad}
+        swatches = _swatches_en(rgb, region, ancho, alto)
+        n_blobs = sum(1 for t in texto if _centro_en(t, caja))
+        evaluadas.append((caja, swatches, n_blobs))
+    if not evaluadas:
+        return None
+    con_marcador = [e for e in evaluadas if e[1]]
+    if con_marcador:
+        return max(con_marcador,
+                   key=lambda e: (len(e[1]), -e[0]["w"] * e[0]["h"]))
+    planas = [e for e in evaluadas if e[2] >= 2]
+    if planas:
+        return min(planas, key=lambda e: e[0]["w"] * e[0]["h"])
+    return None
+
+
+def describir_leyenda(rgb, blobs, ancho, alto) -> dict | None:
+    """Descripción de la leyenda y sus elementos (si existe).
+
+    Devuelve None si no hay leyenda detectable en el perímetro; si hay,
+    dict con posición, caja, entradas (marcador + color + texto) y posible
+    título. La descripción alimenta los checks de auditoría (check_leyenda).
+    """
+    texto = _blobs_texto(blobs, ancho, alto)
+    candidatas = _candidatas_leyenda(_grupos_texto(texto), ancho, alto)
     if not candidatas:
+        return None
+    sel = _seleccionar_leyenda(candidatas, texto, rgb, ancho, alto)
+    if sel is None:
+        return None
+    caja, swatches, _ = sel
+    entradas, titulo = _entradas_leyenda(texto, caja, swatches)
+    return {
+        "posicion": _posicion_leyenda(caja, ancho, alto),
+        "caja": [caja["x"], caja["y"], caja["w"], caja["h"]],
+        "n_entradas": len(entradas),
+        "titulo": titulo,
+        "entradas": entradas,
+    }
+
+
+def check_leyenda(rgb, mascara, blobs, ancho, alto, series) -> list:
+    """Audita la leyenda y todos sus elementos: ausente con series, cortada
+    por el borde, sobre los datos, entradas sin marcador de color, número de
+    entradas vs series detectadas y colores sin correspondencia."""
+    hallazgos = []
+    desc = describir_leyenda(rgb, blobs, ancho, alto)
+    if desc is None:
         # sin leyenda visible en el perímetro: avisar si hay varias series
         if len(series) >= 2:
             hallazgos.append({
@@ -403,7 +706,8 @@ def check_leyenda(gris, mascara, blobs, ancho, alto, series) -> list:
                 "evidencia": {"series": len(series)},
             })
         return hallazgos
-    caja = candidatas[0]
+    caja = {"x": desc["caja"][0], "y": desc["caja"][1],
+            "w": desc["caja"][2], "h": desc["caja"][3]}
     # leyenda cortada por el borde de la imagen (recorte)
     pegado = (caja["x"] <= 1 or caja["y"] <= 1
               or caja["x"] + caja["w"] >= ancho - 1
@@ -412,7 +716,7 @@ def check_leyenda(gris, mascara, blobs, ancho, alto, series) -> list:
         hallazgos.append({
             "tipo": "leyenda", "severidad": "aviso",
             "mensaje": "leyenda pegada/cortada por el borde de la imagen",
-            "evidencia": {"caja": [caja["x"], caja["y"], caja["w"], caja["h"]]},
+            "evidencia": {"caja": desc["caja"]},
         })
     # leyenda sobre los datos: densidad alta debajo de su caja
     densidad = _densidad_en(_integral(mascara), caja["x"], caja["y"],
@@ -423,7 +727,46 @@ def check_leyenda(gris, mascara, blobs, ancho, alto, series) -> list:
             "mensaje": ("leyenda superpuesta a la zona de datos "
                         f"(densidad de tinta {densidad:.0%} bajo la caja)"),
             "evidencia": {"densidad": round(densidad, 3),
-                          "caja": [caja["x"], caja["y"], caja["w"], caja["h"]]},
+                          "caja": desc["caja"]},
+        })
+    # entradas sin marcador de color: no se pueden asociar a ninguna serie
+    sin_marcador = [e for e in desc["entradas"] if e["marcador"] is None]
+    if sin_marcador:
+        hallazgos.append({
+            "tipo": "leyenda_marcador", "severidad": "aviso",
+            "mensaje": (f"{len(sin_marcador)} entrada(s) de leyenda sin marcador "
+                        f"de color (no se pueden asociar a una serie)"),
+            "evidencia": {"entradas": [e["texto"] for e in sin_marcador]},
+        })
+    # conteo de entradas vs series detectadas
+    n_series = len(series)
+    n_entradas = desc["n_entradas"]
+    if n_series >= 2 and n_entradas and n_entradas < n_series:
+        hallazgos.append({
+            "tipo": "leyenda_entradas", "severidad": "aviso",
+            "mensaje": (f"leyenda con {n_entradas} entrada(s) para "
+                        f"{n_series} series detectadas: faltan etiquetas"),
+            "evidencia": {"n_entradas": n_entradas, "n_series": n_series},
+        })
+    elif n_series >= 2 and n_entradas > n_series:
+        hallazgos.append({
+            "tipo": "leyenda_entradas", "severidad": "aviso",
+            "mensaje": (f"leyenda con {n_entradas} entrada(s) para "
+                        f"{n_series} series detectadas: posibles series por "
+                        f"debajo del umbral de tinta"),
+            "evidencia": {"n_entradas": n_entradas, "n_series": n_series},
+        })
+    # colores de la leyenda sin correspondencia en las series detectadas
+    colores_series = {s["color"] for s in series}
+    fantasma = sorted({e["color"] for e in desc["entradas"]
+                       if e["color"] and e["color"] not in colores_series})
+    if fantasma:
+        hallazgos.append({
+            "tipo": "leyenda_color", "severidad": "aviso",
+            "mensaje": (f"colores de la leyenda sin serie correspondiente en el "
+                        f"grafico ({len(fantasma)}): " + ", ".join(fantasma)),
+            "evidencia": {"colores": fantasma,
+                          "series": sorted(colores_series)},
         })
     return hallazgos
 
@@ -486,17 +829,28 @@ def check_nitidez(gris, mascara) -> list:
     return []
 
 
-def check_contraste(gris, mascara) -> list:
+def check_contraste(gris, mascara, invertir: bool = False) -> list:
     """Contraste insuficiente entre tinta y fondo.
 
-    La máscara laxa (gris < 250) captura también tintas pálidas: un
-    elemento 245/255 sobre fondo blanco es poco contrastado aunque no sea
-    "tinta oscura" en el sentido del umbral principal.
+    La máscara laxa captura también tintas pálidas: en modo claro es
+    gris < 250 (un elemento 245/255 sobre fondo blanco es poco contrastado
+    aunque no sea "tinta oscura"); en dark-mode se define respecto al FONDO
+    MODAL del gris (gris > fondo + 25) para no capturar el propio fondo,
+    que dejaría vacía la clase "fondo" y daría contraste 0.0 falso. La
+    diferencia se mide en valor absoluto porque en dark-mode la tinta es
+    MÁS clara que el fondo (la resta sale negativa).
     """
-    laxa = gris < 250
+    if invertir:
+        fondo_gris = float(np.bincount(
+            np.clip(gris, 0, 255).astype(np.uint8).ravel()).argmax())
+        # simétrico del claro (fondo - 5): captura tinta pálida justo sobre
+        # el fondo sin tomar el propio fondo (daría contraste 0.0 falso)
+        laxa = gris > fondo_gris + 8
+    else:
+        laxa = gris < 250
     if laxa.sum() == 0:
         return []
-    c = _contraste(gris, laxa)
+    c = abs(_contraste(gris, laxa))
     if c < 50:
         return [{
             "tipo": "contraste", "severidad": "problema",
@@ -525,6 +879,140 @@ def check_texto_pequeno(blobs, ancho, alto) -> list:
             "evidencia": {"n": len(pequenos)},
         })
     return hallazgos
+
+
+# ---------------------------------------------------------------------------
+# Checks basados en las fuentes de docs/INVESTIGACION-VISUALIZACION.md:
+# WCAG 1.4.3/1.4.11 (contraste), daltonismo (ColorBrewer/Wilke),
+# pie <= 5 slices (Cleveland & McGill, data-to-viz) y max 4-5 series (SWD)
+# ---------------------------------------------------------------------------
+
+def _luminancia_w3c(rgb) -> float:
+    """Luminancia relativa W3C (SC 1.4.3): canales sRGB linealizados."""
+    c = np.asarray(rgb, dtype=float) / 255.0
+    c = np.where(c <= 0.03928, c / 12.92, ((c + 0.055) / 1.055) ** 2.4)
+    return float(0.2126 * c[0] + 0.7152 * c[1] + 0.0722 * c[2])
+
+
+def _ratio_wcag(l1: float, l2: float) -> float:
+    """Ratio de contraste WCAG entre dos luminancias (1-21)."""
+    a, b = sorted([l1, l2], reverse=True)
+    return (a + 0.05) / (b + 0.05)
+
+
+def _color_fondo(rgb: np.ndarray) -> tuple:
+    """Color modal de la imagen (el fondo, típicamente blanco)."""
+    q = (rgb // 32).astype(int)
+    claves = q[:, :, 0] * 1024 + q[:, :, 1] * 32 + q[:, :, 2]
+    k = int(np.bincount(claves.ravel(), minlength=32768).argmax())
+    return (k // 1024) * 32, (k // 32 % 32) * 32, (k % 32) * 32
+
+
+def _hex_a_rgb(color: str) -> tuple:
+    h = color.lstrip("#")
+    return tuple(int(h[i:i + 2], 16) for i in (0, 2, 4))
+
+
+def check_contraste_wcag(rgb, series) -> list:
+    """Contraste WCAG de las series contra el fondo.
+
+    Objetos gráficos (líneas, barras, slices) >= 3:1 (SC 1.4.11); el texto
+    exige 4.5:1 (SC 1.4.3). Fórmula W3C de luminancia relativa (gamma).
+    """
+    hallazgos = []
+    if not series:
+        return hallazgos
+    fondo = _color_fondo(rgb)
+    l_fondo = _luminancia_w3c(fondo)
+    bajos = []
+    for s in series:
+        ratio = _ratio_wcag(l_fondo, _luminancia_w3c(_hex_a_rgb(s["color"])))
+        if ratio < 3.0:
+            bajos.append({"color": s["color"], "ratio": round(ratio, 2)})
+    if bajos:
+        hallazgos.append({
+            "tipo": "contraste_wcag", "severidad": "aviso",
+            "mensaje": (f"{len(bajos)} serie(s) con contraste < 3:1 contra el "
+                        f"fondo (WCAG SC 1.4.11): "
+                        + ", ".join(f"{b['color']} {b['ratio']}:1" for b in bajos)),
+            "evidencia": {"series": bajos,
+                          "fondo": "#%02x%02x%02x" % fondo},
+        })
+    return hallazgos
+
+
+# Matrices de simulación de daltonismo (Machado et al. 2009,
+# "A Physiologically-based Model for Simulation of Color Vision Deficiency").
+_PROTANOPIA = np.array([[0.152286, 1.052583, -0.204868],
+                        [0.114503, 0.786281, 0.099216],
+                        [-0.003882, -0.048116, 1.051998]])
+_DEUTERANOPIA = np.array([[0.367322, 0.860646, -0.227968],
+                          [0.280085, 0.672501, 0.047413],
+                          [-0.011820, 0.042940, 0.968881]])
+
+
+def _simular_daltonismo(color: tuple, matriz: np.ndarray) -> tuple:
+    return tuple(np.clip(np.dot(matriz, np.asarray(color, dtype=float)),
+                         0, 255).astype(int))
+
+
+def check_daltonismo(series) -> list:
+    """Pares de series indistinguibles bajo protanopía/deuteranopía.
+
+    No distinguir por hue solo es el error de color más documentado (Wilke,
+    color-pitfalls; ColorBrewer). La simulación aplica las matrices de
+    Machado y compara las distancias RGB de los pares simulados.
+    """
+    hallazgos = []
+    if len(series) < 2:
+        return hallazgos
+    cols = [_hex_a_rgb(s["color"]) for s in series]
+    confusos = []
+    for nombre, matriz in (("protanopia", _PROTANOPIA),
+                           ("deuteranopia", _DEUTERANOPIA)):
+        sim = [_simular_daltonismo(c, matriz) for c in cols]
+        for i in range(len(sim)):
+            for j in range(i + 1, len(sim)):
+                d = float(np.linalg.norm(np.asarray(sim[i], dtype=float)
+                                         - np.asarray(sim[j], dtype=float)))
+                if d < 35.0:
+                    confusos.append((series[i]["color"], series[j]["color"],
+                                     nombre, round(d)))
+    if confusos:
+        hallazgos.append({
+            "tipo": "daltonismo", "severidad": "aviso",
+            "mensaje": ("pares de series indistinguibles para daltonismo: "
+                        + "; ".join(f"{a}/{b} ({tipo}, d={d})"
+                                    for a, b, tipo, d in confusos)),
+            "evidencia": {"pares": [list(p) for p in confusos]},
+        })
+    return hallazgos
+
+
+def check_pie_slices(series, tipo: str) -> list:
+    """Pie con demasiados slices: comparar ángulos es impreciso (Cleveland
+    & McGill 1984); data-to-viz recomienda <= 5 categorías."""
+    if tipo != "pastel" or len(series) < 6:
+        return []
+    return [{
+        "tipo": "pie_slices", "severidad": "aviso",
+        "mensaje": (f"pastel con {len(series)} slices: comparar angulos con "
+                    f"mas de ~5 categorias es impreciso (considerar barras)"),
+        "evidencia": {"slices": len(series)},
+    }]
+
+
+def check_series_limit(series) -> list:
+    """Más de 4-5 series: el lector no puede seguir más (spaghetti rule,
+    SWD; data-to-viz)."""
+    if len(series) < 6:
+        return []
+    return [{
+        "tipo": "series", "severidad": "aviso",
+        "mensaje": (f"{len(series)} series de color: mantener 4-5 maximo o "
+                    f"dividir en small multiples"),
+        "evidencia": {"n_series": len(series)},
+    }]
 
 
 def check_ruido(gris, mascara) -> list:
@@ -575,6 +1063,12 @@ def clasificar_tipo(blobs, ancho, alto, series) -> dict:
 
     Devuelve {"tipo": ..., "confianza": ..., "claves": {...}}.
     Se reporta 'indeterminado' sin confianza en lugar de inventar.
+    Señales usadas: (a) pastel/donut: un blob grande casi circular (w≈h),
+    sólido (pastel, densidad alta) o anillo con hueco (donut, densidad
+    baja); (b) barras: >= 3 rectángulos alineados sobre una base común —
+    base inferior (verticales) o base lateral izquierda/derecha
+    (horizontales); (c) línea: tinta continua y delgada a lo ancho;
+    (d) scatter: muchos puntos pequeños dispersos sin blobs grandes.
     """
     area_img = ancho * alto
     grandes = _blobs_grandes(blobs, ancho, alto)
@@ -588,14 +1082,19 @@ def clasificar_tipo(blobs, ancho, alto, series) -> dict:
     if not grandes:
         return {"tipo": "indeterminado", "confianza": 0.0, "claves": {}}
     rects = [b for b in grandes if _es_rectangular(b)]
-    # pastel: un blob grande casi circular (densidad alta, w≈h)
+    # pastel/donut: un blob grande casi circular; la densidad distingue el
+    # pastel sólido (~0.78, pi/4) del donut con hueco central (mucho menor)
     for b in grandes:
         if b["w"] >= 0.25 * ancho and b["h"] >= 0.25 * alto:
-            if abs(b["w"] - b["h"]) <= 0.15 * max(b["w"], b["h"]):
+            if abs(b["w"] - b["h"]) <= 0.2 * max(b["w"], b["h"]):
+                donut = b["densidad"] < 0.7
                 return {"tipo": "pastel", "confianza": 0.7,
-                        "claves": {"blob": [b["x"], b["y"], b["w"], b["h"]]}}
-    # barras: >= 3 rectángulos alineados verticalmente (filas base parecidas)
+                        "claves": {"blob": [b["x"], b["y"], b["w"], b["h"]],
+                                   "donut": donut,
+                                   "densidad": round(b["densidad"], 3)}}
+    # barras: >= 3 rectángulos alineados sobre una base común
     if len(rects) >= 3:
+        # base INFERIOR alineada (barras verticales: y+h constante)
         bases = sorted(b["y"] + b["h"] for b in rects)
         mediana = bases[len(bases) // 2]
         alineadas = sum(1 for b in bases if abs(b - mediana) <= 0.12 * alto)
@@ -603,7 +1102,23 @@ def clasificar_tipo(blobs, ancho, alto, series) -> dict:
         if alineadas >= 3 and verticales >= 2:
             return {"tipo": "barras", "confianza": 0.8,
                     "claves": {"rectangulos": len(rects),
-                               "alineadas": alineadas, "verticales": verticales}}
+                               "alineadas": alineadas,
+                               "orientacion": "vertical"}}
+        # base LATERAL alineada (barras horizontales: x o x+w constante)
+        izquierdas = sorted(b["x"] for b in rects)
+        med_izq = izquierdas[len(izquierdas) // 2]
+        alineadas_izq = sum(1 for b in izquierdas
+                            if abs(b - med_izq) <= 0.12 * ancho)
+        derechas = sorted(b["x"] + b["w"] for b in rects)
+        med_der = derechas[len(derechas) // 2]
+        alineadas_der = sum(1 for b in derechas
+                            if abs(b - med_der) <= 0.12 * ancho)
+        horizontales = sum(1 for b in rects if b["w"] >= b["h"])
+        if (alineadas_izq >= 3 or alineadas_der >= 3) and horizontales >= 2:
+            return {"tipo": "barras", "confianza": 0.8,
+                    "claves": {"rectangulos": len(rects),
+                               "alineadas": max(alineadas_izq, alineadas_der),
+                               "orientacion": "horizontal"}}
     # línea: tinta continua y delgada a lo ancho (blob alargado)
     for b in grandes:
         if b["w"] >= 0.5 * ancho and b["h"] <= 0.15 * alto:
@@ -617,16 +1132,22 @@ def _describir_simple(imagen) -> dict:
     """Análisis determinista de UNA imagen como gráfico único (sin grid)."""
     img, gris, rgb = _cargar(imagen)
     ancho, alto = img.size
-    mascara = _tinta(gris)
+    dark = _es_modo_oscuro(rgb)
+    mascara = _tinta(gris, invertir=dark)
     blobs = _componentes(mascara)
     series = _colores_series(rgb, mascara)
     tipo = clasificar_tipo(blobs, ancho, alto, series)
+    leyenda = describir_leyenda(rgb, blobs, ancho, alto)
     checks = [
         check_superposiciones(gris, mascara, blobs, ancho, alto),
-        check_leyenda(gris, mascara, blobs, ancho, alto, series),
+        check_leyenda(rgb, mascara, blobs, ancho, alto, series),
         check_zoom_cortes(gris, mascara, ancho, alto),
         check_nitidez(gris, mascara),
-        check_contraste(gris, mascara),
+        check_contraste(gris, mascara, invertir=dark),
+        check_contraste_wcag(rgb, series),
+        check_daltonismo(series),
+        check_pie_slices(series, tipo["tipo"]),
+        check_series_limit(series),
         check_texto_pequeno(blobs, ancho, alto),
         check_ruido(gris, mascara),
         check_resolucion(ancho),
@@ -637,10 +1158,13 @@ def _describir_simple(imagen) -> dict:
         "tipo": tipo["tipo"],
         "confianza_tipo": tipo["confianza"],
         "claves_tipo": tipo["claves"],
+        "modo_oscuro": dark,
         "series": series,
         "n_series": len(series),
+        "leyenda": leyenda,
         "hallazgos": hallazgos,
-        "resumen": _resumen_determinista(tipo["tipo"], len(series), hallazgos),
+        "resumen": _resumen_determinista(tipo["tipo"], len(series), hallazgos,
+                                         leyenda, dark),
     }
 
 
@@ -896,6 +1420,47 @@ def _analisis_panel(imagen, panel: dict) -> dict:
     return res
 
 
+def _excluir_leyenda(mascara: np.ndarray, leyenda: dict | None,
+                     ancho: int, alto: int) -> np.ndarray:
+    """Máscara para el layout sin la franja perimetral de la leyenda.
+
+    Una leyenda perimetral no es un panel: su franja (incluida la banda
+    vacía que la separa del contenido) se elimina para que el detector de
+    grid no genere columnas/filas espurias. La leyenda interior (sobre los
+    datos) no se excluye: ahí el layout no aplica.
+    """
+    if not leyenda:
+        return mascara
+    pos = leyenda["posicion"]
+    if pos == "interior":
+        return mascara
+    x0, y0, w, h = leyenda["caja"]
+    m = mascara.copy()
+    if pos in ("derecha", "izquierda"):
+        perfil = m.mean(axis=0)
+        if pos == "derecha":
+            ult = np.where(perfil[:x0] > 0)[0]
+            corte = int(ult[-1]) + 1 if len(ult) else x0
+            m[:, corte:] = False
+        else:
+            x1 = x0 + w
+            prim = np.where(perfil[x1:] > 0)[0]
+            corte = int(prim[0]) + x1 if len(prim) else x0
+            m[:, :corte] = False
+    else:
+        perfil = m.mean(axis=1)
+        if pos == "abajo":
+            ult = np.where(perfil[:y0] > 0)[0]
+            corte = int(ult[-1]) + 1 if len(ult) else y0
+            m[corte:, :] = False
+        else:
+            y1 = y0 + h
+            prim = np.where(perfil[y1:] > 0)[0]
+            corte = int(prim[0]) + y1 if len(prim) else y0
+            m[:corte, :] = False
+    return m
+
+
 def describir_determinista(imagen) -> dict:
     """Análisis determinista completo: gráfico único o grid de paneles.
 
@@ -905,10 +1470,13 @@ def describir_determinista(imagen) -> dict:
     """
     img, gris, rgb = _cargar(imagen)
     ancho, alto = img.size
-    mascara = _tinta(gris)
     resultado = _describir_simple(imagen)
+    dark = resultado["modo_oscuro"]
+    mascara = _tinta(gris, invertir=dark)
     resultado["multi_panel"] = None
-    layout = detectar_layout(mascara, ancho, alto)
+    # la franja perimetral de la leyenda no es un panel: se excluye del grid
+    layout = detectar_layout(_excluir_leyenda(mascara, resultado["leyenda"],
+                                              ancho, alto), ancho, alto)
     if layout["es_multi"]:
         paneles = []
         for p in layout["paneles"]:
@@ -920,6 +1488,7 @@ def describir_determinista(imagen) -> dict:
                 "cobertura": round(p["cobertura"], 4),
                 "tipo": analisis["tipo"],
                 "n_series": analisis["n_series"],
+                "leyenda": analisis["leyenda"],
                 "hallazgos": analisis["hallazgos"],
             })
         layout_hallazgos = check_layout(mascara, layout, ancho, alto)
@@ -941,10 +1510,18 @@ def describir_determinista(imagen) -> dict:
     return resultado
 
 
-def _resumen_determinista(tipo: str, n_series: int, hallazgos: list) -> str:
+def _resumen_determinista(tipo: str, n_series: int, hallazgos: list,
+                          leyenda: dict | None = None,
+                          dark: bool = False) -> str:
     lineas = [f"Grafico de tipo '{tipo}'"
+              + (" en modo oscuro" if dark else "")
               + (f" con {n_series} serie(s) de color" if n_series else "")
               + "."]
+    if leyenda:
+        pos = leyenda["posicion"]
+        n_entradas = leyenda["n_entradas"]
+        lineas.append(f"Leyenda {'con titulo' if leyenda['titulo'] else 'sin titulo'}: "
+                      f"{n_entradas} entrada(s) en el margen {pos}.")
     graves = [h for h in hallazgos if h["severidad"] == "problema"]
     avisos = [h for h in hallazgos if h["severidad"] == "aviso"]
     if graves:
@@ -970,12 +1547,28 @@ _SUGERENCIAS_POR_TIPO = {
                       "frecuencia de ticks o mostrar solo cada N valores"),
     "leyenda": ("revisar la leyenda: etiquetar las series (o agregar leyenda "
                 "exterior) sin tapar los datos"),
+    "leyenda_marcador": ("agregar marcador de color a cada entrada de la "
+                         "leyenda: sin el swatch el lector no puede asociar "
+                         "el texto a la serie"),
+    "leyenda_entradas": ("completar la leyenda: una entrada por serie, con el "
+                         "mismo nombre y color que la serie (o eliminar "
+                         "entradas sin serie)"),
+    "leyenda_color": ("revisar los colores de la leyenda: cada entrada debe "
+                      "usar el color exacto de su serie en el grafico"),
     "zoom": ("ajustar el encuadre: el contenido no debe tocar los bordes de "
              "la imagen ni quedar diminuto en el lienzo"),
     "nitidez": ("usar la imagen original a resolucion completa en vez de una "
                 "re-escalada (el upscale suaviza el texto)"),
     "contraste": ("aumentar el contraste de texto y series contra el fondo "
                   "(WCAG: 4.5:1 texto, 3:1 objetos graficos)"),
+    "contraste_wcag": ("aumentar el contraste de las series contra el fondo "
+                       "(WCAG SC 1.4.11: 3:1 para objetos graficos)"),
+    "daltonismo": ("usar una paleta colorblind-safe (ColorBrewer) o "
+                   "diferenciar por forma/patron ademas del color"),
+    "pie_slices": ("reducir el numero de slices del pastel (~5 maximo) o "
+                   "pasar a barras (comparar angulos es impreciso)"),
+    "series": ("reducir a 4-5 series o dividir en small multiples "
+               "(facetas alineadas)"),
     "texto": ("aumentar el tamano de fuente de las etiquetas (los defaults de "
               "los software suelen ser demasiado pequenos)"),
     "ruido": ("re-exportar sin artefactos (PNG, o JPEG con calidad alta)"),
@@ -1077,11 +1670,12 @@ PROMPT_VISION = (
     "general, y valores destacados si se leen claramente. Luego evalua los "
     "siguientes aspectos de presentacion con formato 'Aspecto: nota/10' en "
     "lineas separadas: superposiciones (etiquetas/series que se solapan), "
-    "leyenda (presente, legible, no tapa datos), zoom (recortes, contenido "
-    "muy chico o muy grande), errores visuales (texto cortado, ejes rotos, "
-    "valores que no coinciden), estetica general (alineacion, espacios, "
-    "contraste). Si un aspecto no aplica, escribe 'Aspecto: N/A'. "
-    "Responde solo con la descripcion y las lineas 'Aspecto: nota/10'."
+    "leyenda (presente, legible, no tapa datos, una entrada por serie con su "
+    "marcador de color), zoom (recortes, contenido muy chico o muy grande), "
+    "errores visuales (texto cortado, ejes rotos, valores que no coinciden), "
+    "estetica general (alineacion, espacios, contraste). Si un aspecto no "
+    "aplica, escribe 'Aspecto: N/A'. Responde solo con la descripcion y las "
+    "lineas 'Aspecto: nota/10'."
 )
 
 
@@ -1145,7 +1739,11 @@ def vision_ia(imagen, motor: str = "docbee", device: str = "gpu",
             res = run_docbee(png, PROMPT_VISION, device, timeout_s=timeout_s)
         else:
             res = run_ollama(png, PROMPT_VISION, host, modelo, timeout_s=timeout_s)
-        texto = (res or {}).get("respuesta", "") if isinstance(res, dict) else str(res)
+        if not isinstance(res, dict) or not res.get("ok"):
+            error = res.get("error") if isinstance(res, dict) else str(res)
+            return {"ok": False, "texto": "", "rubrica": None,
+                    "error": error or f"motor {motor} sin respuesta"}
+        texto = res.get("texto", "")
         return {"ok": True, "texto": texto,
                 "rubrica": _parsear_rubrica_vlm(texto), "error": None}
     except Exception as exc:  # noqa: BLE001 - fallo del motor, reportado
@@ -1218,8 +1816,22 @@ def _a_markdown(resultado: dict) -> str:
               f"- Tipo detectado: {resultado['tipo']} "
               f"(confianza {resultado['confianza_tipo']})",
               f"- Series de color: {resultado['n_series']}"]
+    if resultado.get("modo_oscuro"):
+        lineas.append("- Modo oscuro: si")
     if resultado["series"]:
         lineas.append("- Colores: " + ", ".join(s["color"] for s in resultado["series"]))
+    leyenda = resultado.get("leyenda")
+    if leyenda:
+        lineas += ["", "## Leyenda",
+                   f"- Posicion: {leyenda['posicion']}",
+                   f"- Caja: {leyenda['caja']}",
+                   f"- Entradas: {leyenda['n_entradas']}",
+                   (f"- Titulo: {leyenda['titulo']}"
+                    if leyenda["titulo"] else "- Sin titulo")]
+        for e in leyenda["entradas"]:
+            marcador = e["marcador"] or "sin marcador"
+            lineas.append(f"  - color={e['color'] or 'sin color'} marcador={marcador} "
+                          f"texto={e['texto']}")
     hallazgos = resultado["hallazgos"]
     lineas += ["", f"## Hallazgos ({len(hallazgos)})", ""]
     if not hallazgos:
@@ -1243,23 +1855,26 @@ def _a_markdown(resultado: dict) -> str:
 
 def generar_demo(ruta: str = "ejemplos/grafico_auditoria_demo.png") -> str:
     """Genera un gráfico de barras sintético con problemas a propósito
-    (etiquetas superpuestas, leyenda pegada al borde) para probar la
-    auditoría sin archivos externos."""
-    img = Image.new("RGB", (900, 600), "white")
+    (etiquetas superpuestas, entrada de leyenda sin marcador de color) para
+    probar la auditoría sin archivos externos. La leyenda incluye título,
+    entrada con marcador y entrada sin marcador (descripción de elementos)."""
+    img = Image.new("RGB", (1000, 600), "white")
     d = ImageDraw.Draw(img)
     # barras
     for i, v in enumerate([120, 190, 80, 210, 150]):
-        x0 = 120 + i * 150
+        x0 = 130 + i * 160
         d.rectangle([x0, 600 - 40 - v, x0 + 90, 600 - 40], fill=(52, 101, 164))
     # etiquetas de valores superpuestas (mismo lugar)
     for i in range(5):
-        x = 165 + i * 150
+        x = 175 + i * 160
         d.text((x - 6, 320), "1.234", fill="black")
         d.text((x - 4, 322), "1.234", fill="black")
-    # leyenda pegada al borde derecho
-    d.rectangle([880, 120, 940, 260], outline="black")
-    d.text((885, 130), "Serie A", fill="black")
-    d.text((885, 180), "Serie B", fill="black")
+    # leyenda derecha: titulo + entrada con marcador + entrada sin marcador
+    fuente = _fuente_demo(18)
+    d.text((880, 95), "Ventas", fill="black", font=fuente)
+    d.rectangle([878, 134, 896, 152], fill=(52, 101, 164))
+    d.text((902, 132), "Serie A", fill="black", font=fuente)
+    d.text((902, 170), "Serie B", fill="black", font=fuente)
     # eje
     d.line([(60, 560), (860, 560)], fill="black", width=3)
     img.save(ruta)

@@ -373,3 +373,47 @@ Detalles verificados:
 - **Calibración de heurísticas (lecciones):** sólidos extensos (barras) excluidos de la densidad de "texto" vía ventana local 8×8 (interior de barra = 100%, eje fino = 37%, glifo ~50%); la ventana de densidad se ajusta a la altura mediana de los glifos; umbral dinámico 15% del máximo para descartar filas/cols espurias (una leyenda pegada no es un panel).
 
 **Diseño basado en investigación verificada:** `docs/INVESTIGACION-VISUALIZACION.md` (herramientas gratuitas sin cuentas: DePlot/UniChart/WebPlotDigitizer/BRISQUE/piq/Photopea/Qwen2.5-VL...; errores humanos: ejes truncados, dual axis, pie ≥6, >8 colores, chartjunk; errores de IAs: alucinación de valores ChartVRBench 20-56%, lecturas de eje, OCR; principios: Cleveland & McGill, WCAG 1.4.3/1.4.11, baseline cero, 4-5 series máx, small multiples).
+
+## 16.1 Mejora: accesibilidad de color y límites de series (2026-08-16)
+
+**Qué es:** 4 checks nuevos en `auditoria_graficos.py`, basados en `docs/INVESTIGACION-VISUALIZACION.md`:
+
+- **Contraste WCAG (`check_contraste_wcag`):** luminancia relativa W3C (gamma sRGB) de cada color de serie contra el fondo modal; < 3:1 → aviso (SC 1.4.11 objetos gráficos).
+- **Daltonismo (`check_daltonismo`):** simulación protanopia/deuteranopia con las matrices de Machado et al. 2009; pares de series a distancia RGB < 35 en la simulación → aviso (no distinguir por hue solo; ColorBrewer/Wilke).
+- **Pie con demasiados slices (`check_pie_slices`):** pastel con ≥6 colores dominantes → aviso (comparar ángulos es impreciso, Cleveland & McGill 1984; data-to-viz ≤5).
+- **Límite de series (`check_series_limit`):** ≥6 series de color → aviso spaghetti (SWD: 4-5 máximo, o small multiples).
+
+**Evidencia (P0.1):**
+- 9 tests nuevos en `test_auditoria_graficos.py` (serie pálida `#fafac8` sobre blanco → ratio < 3:1 detectado; azul oscuro OK; pares rojos cercanos confundibles bajo protanopia; rojo/azul OK; pie 6 slices vs 2; 6 series vs 4; luminancia blanca > negra). Suite del módulo: **47/47 OK**.
+- Suite completa: **391/391 OK**. Verificador: 41 OK.
+- Anonimización P0.9: las 4 rutas `/home/<usuario>/` pre-existentes en docstrings de `vision.py` y `scripts/*.py` reemplazadas por `python` (auditoría grep limpia).
+
+**Sugerencias nuevas por hallazgo:** paleta colorblind-safe (ColorBrewer) o diferenciar por forma; reducir slices del pastel o pasar a barras; reducir a 4-5 series o dividir en facetas.
+
+## 16.2 Mejora: descripción y auditoría completa de leyendas (2026-08-16)
+
+**Qué es:** `describir_leyenda()` describe TODOS los elementos de la leyenda y `check_leyenda()` los audita:
+
+- **Descripción (campo `leyenda` del informe):** posición (derecha/izquierda/arriba/abajo/interior), caja, `n_entradas`, título (bbox o None) y cada entrada con su marcador de color (swatch bbox + color cuantizado) y etiqueta de texto (bbox). El anti-aliasing de las fuentes fragmenta el texto en glifos: `_fusionar_lineas()` los une por renglón iterando hasta convergencia.
+- **Detección de la candidata:** perímetro EXTERIOR (margen 12%, no 20%: una etiqueta de valor sobre la última barra no es leyenda), descarte de grupos >30% del lienzo (eje + etiquetas) y de proporciones de panel (una fila de barras de un grid no es leyenda), prioridad a candidatas con marcadores de color y desempate por caja compacta; sin marcadores, exige >= 2 blobs de texto (un título de grid es 1 blob y queda fuera).
+- **Auditoría (hallazgos nuevos):** `leyenda_marcador` (entradas sin swatch: no se pueden asociar a una serie), `leyenda_entradas` (conteo de entradas < o > series detectadas), `leyenda_color` (colores de entradas sin correspondencia en las series). Se suman a los existentes: ausente con series, pegada/cortada, sobre los datos.
+- **Integración:** la franja perimetral de la leyenda se excluye del layout (`_excluir_leyenda()`) para que no genere paneles falsos en grids; los swatches (sólidos pequeños casi cuadrados) se excluyen de la máscara de texto para no reportar falsas superposiciones; cada panel del grid lleva su `leyenda`; el resumen menciona título/entradas/posición; la salida markdown describe la sección Leyenda; el prompt VLM pide evaluar entradas y marcadores; 3 sugerencias nuevas.
+
+**Evidencia (P0.1):**
+- 6 tests nuevos en `test_auditoria_graficos.py`: descripción completa (posición derecha, título, 2 entradas con colores `#2060a0`/`#c00000`), leyenda sin título, entradas sin marcador (la existente `_con_leyenda_pegada`), leyenda incompleta (3 series, 2 entradas → `leyenda_entradas`), sin leyenda → None. Suite del módulo: **53/53 OK**; suite completa: **396/396 OK**.
+- **Demo (`--demo`):** barras + etiquetas superpuestas + leyenda derecha con título "Ventas", entrada "Serie A" con marcador `#2060a0` y entrada "Serie B" sin marcador. Informe: posición derecha, 2 entradas, título detectado, hallazgo `leyenda_marcador` + sugerencia, sin paneles falsos en el layout.
+- **Caso límite:** grid 2x2 sintético con barras → NO se detecta leyenda falsa (las filas de barras tienen proporciones de panel y quedan descartadas); la exclusión de la leyenda no altera la detección de alineación de ejes.
+
+## 16.3 Mejora: clasificador de tipo con donut, barras-h y dark-mode (2026-08-16)
+
+**Qué es:** rediseño de las señales de `clasificar_tipo()` + soporte de fondo oscuro en todo el análisis determinista:
+
+- **Donut:** el pastel se detecta por blob grande casi circular (tolerancia w≈h ampliada a 20%); la densidad distingue pastel sólido (~0.78 = π/4) de donut con hueco central (< 0.7) → `claves_tipo.donut: True/False`.
+- **Barras horizontales:** además de la base INFERIOR alineada (verticales, y+h constante), se detecta la base LATERAL (x o x+w constante) → `claves_tipo.orientacion: vertical|horizontal`. Antes `verticales >= 2` (h > w) exigía barras verticales.
+- **Dark-mode:** `_es_modo_oscuro()` (luminancia W3C del color modal < 0.5) invierte la máscara de tinta (`_tinta(invertir=True)`: píxeles CLAROS sobre fondo oscuro); `check_contraste` usa valor absoluto (en oscuro tinta > fondo → resta negativa); el informe expone `modo_oscuro: true` y el resumen lo menciona; se aplica en `_describir_simple` y `describir_determinista` (grids incluidos).
+
+**Evidencia (P0.1):**
+- 5 tests nuevos (donut, pastel sólido no es donut, barras-h, barras-v orientación, dark-mode). Suite del módulo: **58/58 OK**; suite completa: **401/401 OK**.
+- Verificación manual con imágenes sintéticas: donut (hueco 240x140 → densidad 0.652 → donut), barras-h (4 rects base x=80), dark barras-v (5 rects claros sobre #1e1e1e → `modo_oscuro: true`), dark barras-h, dark línea recta → `linea`; pastel sólido (densidad 0.827 → no donut); demo en claro intacta (barras + leyenda derecha).
+- Límite conocido: una línea en zigzag se fragmenta en blobs de < 50% del ancho y no clasifica como `linea` (pre-existente, geometría, no dark-mode).
+- Verificador: 39 OK, 2 FALLOS pre-existentes (árbol sucio, rutas `/home/<usuario>/` en docs).

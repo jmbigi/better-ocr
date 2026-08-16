@@ -481,3 +481,65 @@
 **Verificación:** 38 tests unitarios del módulo + 4 del endpoint `/auditoria` en `test_extraccion.py` (382/382 totales); criterios calibrados contra la demo real (etiquetas superpuestas, leyenda pegada) y grids sintéticos (alineación, gutters irregulares, panel vacío, sin título). `bash scripts/verificar-proyecto.sh` → 40 OK.
 
 **Lección:** las heurísticas de visión por computadora necesitan contrafactuales (¿qué pasa con un gráfico único que parece grid? ¿con un texto engrosado?) ANTES de fijar umbrales: cada umbral debe calibrarse contra el caso positivo Y el negativo, y los tests sintéticos son la herramienta.
+
+## 38. Accesibilidad de color: WCAG y daltonismo como checks deterministas (2026-08-16)
+
+**Contexto:** ampliación de `auditoria_graficos.py` con los checks pendientes de la investigación (INVESTIGACION-VISUALIZACION.md §4: WCAG 1.4.3/1.4.11, ColorBrewer, C&M 1984, spaghetti rule).
+
+**Hallazgo 1 — la fórmula WCAG no es la resta lineal de grises:** el check de contraste original (diferencia de luminancia) no capturaba el caso de una serie amarilla pálida sobre blanco, que la luminancia relativa W3C (linealización gamma de los canales sRGB) sí detecta (< 3:1). El check `contraste_wcag` usa la fórmula oficial; el check lineal previo se mantiene como medida general de tinta.
+
+**Hallazgo 2 — el daltonismo se simula con matrices estándar, no con heurísticas:** aplicar las matrices de Machado et al. 2009 (protanopia/deuteranopia) a los colores de las series y medir la distancia de los pares simulados es determinista y testeable: dos rojos cercanos quedan a distancia < 35 y se reportan; rojo/azul no. Verificado con tests directos (sin imágenes).
+
+**Hallazgo 3 — los límites de UX son números documentados, no opiniones:** ≤5 slices en pie (C&M: comparar ángulos es impreciso) y ≤4-5 series (spaghetti rule, SWD) se codificaron como avisos con las fuentes en el doc de investigación.
+
+**Verificación:** 9 tests nuevos (47/47 del módulo, 391/391 totales); verificador 41 OK; auditoría grep de rutas personales limpia tras anonimizar los `/home/<usuario>/` pre-existentes en docstrings (P0.9 — detectados por el check de rutas del upstream en la lección 36, ahora también cubren .py).
+
+**Lección:** los checks de accesibilidad de color deben usar las fórmulas oficiales (WCAG, Machado) y probarse con valores extremos conocidos (serie pálida, pares confundibles), no con imágenes reales ambiguas.
+
+## 39. Leyenda de gráficos: describir todos sus elementos sin falsos positivos (2026-08-16)
+
+**Contexto:** ampliación de `auditoria_graficos.py` para DESCRIBIR la leyenda (posición, caja, entradas con marcador de color + etiqueta, título) y AUDITAR sus elementos (entradas sin marcador, conteo vs series, colores sin correspondencia), manteniendo los checks previos (ausente, pegada, sobre datos).
+
+**Hallazgo 1 — el grupo gigante (eje + etiquetas + leyenda) se elegía como "leyenda":** la agrupación por proximidad usaba la altura del GRUPO (que crece) en la expansión: 4×altura de 161 px "puentea" distancias y fusiona el eje, las etiquetas de valores y la leyenda en un solo grupo que toca el perímetro. Fix doble: (a) los blobs de densidad muy baja (recuadro outline ~4%, eje ~13%) se excluyen de la agrupación — no son etiquetas; (b) la expansión de proximidad usa la altura del blob ENTRANTE, no del grupo (misma trampa que la lección 37).
+
+**Hallazgo 2 — las filas de barras de un grid sintético se detectaban como leyenda falsa:** un panel de barras (4 rectángulos + eje) es un blob "de texto" según `_blobs_texto` y al quedar en el perímetro se elegía como leyenda; su franja además se excluía del layout y rompía la alineación de ejes del grid. Fix: descartar candidatas con proporciones de panel (w > 30% del ancho o h > 30% del alto) — una leyenda es compacta. Sin este filtro, la leyenda falsa cortaba la máscara del layout (`_excluir_leyenda`) y el grid 2x2 pasaba a 2x1.
+
+**Hallazgo 3 — el anti-aliasing de las fuentes reales fragmenta el texto en glifos:** con DejaVu 18 px cada letra es un blob separado (los píxeles grises intermedios no pasan el umbral de tinta): "Serie A" daba 5-6 "entradas". Fix: `_fusionar_lineas()` une glifos del mismo renglón (centro-y coincidente + gap horizontal <= 2×altura) ITERANDO hasta convergencia — una sola pasada falla porque el orden de los glifos deja huecos que solo se cierran al crecer la línea.
+
+**Hallazgo 4 — el recuadro outline y los marcadores contaminan la detección:** el outline del recuadro (densidad ~4%) se unía al texto y lo fragmentaba en la agrupación; el swatch de color (sólido pequeño casi cuadrado, densidad 1.0) se contaba como "texto" y daba falsas superposiciones de etiquetas. Fix: outline/eje excluidos por densidad baja en `_grupos_texto`; los sólidos pequeños con proporciones cuadradas (0.8-1.25) se excluyen de la máscara de texto (son marcadores de leyenda, no glifos — un glifo real no pasa del ~60% de densidad).
+
+**Hallazgo 5 — el perímetro para candidatas a leyenda no es el 20% genérico:** una etiqueta de valor sobre la última barra (x=767 en 900 px) quedaba dentro del margen 20% y era "perimetral". Fix: margen 12% (la leyenda está pegada al borde de la imagen; una etiqueta de datos no). El umbral de área baja de 0.05% a 0.015% del lienzo (una entrada mínima, no dos), porque la compacidad y el conteo de blobs los exige la selección.
+
+**Verificación:** 6 tests nuevos (53/53 del módulo, 396/396 totales); demo real con título, entrada con marcador `#2060a0` y entrada sin marcador → `leyenda_marcador` + descripción completa (posición, caja, entradas, título); grid 2x2 sin leyenda falsa y con alineación de ejes intacta; `bash scripts/verificar-proyecto.sh` → 39 OK, 2 FALLOS (árbol sucio y rutas `/home/<usuario>/` pre-existentes en docs, ajenos a esta tarea).
+
+**Lección:** describir un elemento gráfico exige separar los "contaminantes" (outline, ejes, swatches, anti-aliasing) ANTES de contar: cada clase de píxel necesita su propio canal (densidad baja = contenedor, sólido cuadrado pequeño = marcador, glifo fragmentado = renglón a fusionar), y cada nuevo check debe probarse contra grids sintéticos para no romper los existentes.
+
+## 40. Charts reales de internet: la capa VLM del auditor nunca devolvió texto (bug de clave) + fallos del clasificador de tipo (2026-08-16)
+
+**Contexto:** prueba de `auditoria_graficos.py` y `chart_server.py` con 6 gráficos reales bajados de Wikimedia Commons (`/tmp/opencode/charts/`: barras, pastel/donut, líneas, scatter 3D, heatmap de temperaturas) y capa VLM `--vision docbee --device gpu` (RTX 3070, lección 17).
+
+**Hallazgo 1 — `vision_ia` leía una clave inexistente y traga fallos del motor:** `run_docbee`/`run_ollama` devuelven `{"texto": ...}`, pero `vision_ia()` leía `res.get("respuesta", "")` → texto SIEMPRE vacío (6/6), y devolvía `ok:True` aun cuando el motor fallaba (p. ej. `ModuleNotFoundError: paddlex`). `revision.py:1394` ya usaba el patrón correcto (`res.get("texto")` + chequeo `res.get("ok")`, fallo explícito P1.19). Fix aplicado en `auditoria_graficos.py::vision_ia` (mismo patrón que revision.py); 52 tests del módulo OK.
+
+**Hallazgo 2 — el entorno importa: `run_docbee` lanza el subproceso con `sys.executable`:** ejecutar el auditor con el python del pyenv (sin paddlex) → el subproceso VLM falla `ModuleNotFoundError`; con `.venv/bin/python3` funciona (4.8 s de inferencia, 7.1 GB RAM pico por imagen). El fix de Hallazgo 1 hace que ese fallo ahora se REPORTS en vez de ocultarse.
+
+**Hallazgo 3 — el clasificador de tipo (heurísticas de blob) falla en charts reales, no en sintéticos:** con confianza 0.6-0.7, un donut con banda inferior de etiquetas → "linea", un scatter 3D con fondo oscuro → "pastel", un gráfico de barras horizontales → "linea"; un heatmap oscuro → "indeterminado" (abstención correcta, aunque docbee lo describe como barras). El VLM (post-fix) confirmó: line_gdp = línea ✅; pie_clasico = donut ❌; scatter = scatter 3D ❌; bar_cgpt = barras ❌; bar_temperatura = barras (abstención defensible); bar_ipcc = respuesta de rúbrica vacía (docbee no describió). Las imágenes sintéticas de los tests no cubren fondos oscuros ni donuts con etiquetas inferiores.
+
+**Hallazgo 4 — `POST /auditoria` espera JSON con ruta en el servidor, no multipart:** `{"image": "/ruta/al/archivo.png"}` → 200; `curl -F image=@...` → 400. El endpoint no sube imágenes: audita archivos ya presentes en la máquina del servidor.
+
+**Verificación:** fix + 52 tests del módulo (53 totales del módulo con los pre-existentes); 391/391 tests totales medidos en esta sesión (lección 39 reportó 396; la diferencia no se investigó); los 6 runs VLM post-fix con texto no vacío; `py_compile` OK.
+
+**Lección:** (1) un wrapper que "devuelve ok:True siempre" convierte fallos del motor en silencio: el patrón correcto es leer la clave real, verificar `ok` y reportar el error; (2) probar con gráficos REALES bajados de internet expone fallos que los sintéticos no: el clasificador de tipo necesita señales más robustas (presencia de base de barras, fondo oscuro/dark-mode, donut con banda de etiquetas) y no debe confiar solo en blobs de tinta con umbrales calibrados con charts claros.
+
+## 40. Clasificador de tipo: donut, barras horizontales y dark-mode (2026-08-16)
+
+**Contexto:** el clasificador de `auditoria_graficos.py` fallaba en 3 casos verificados (indeterminado conf 0.0): donut, barras horizontales y fondo oscuro. Se rediseñaron las señales.
+
+**Hallazgo 1 — la señal de barras exigía base INFERIOR y rectángulos altos:** `verticales >= 2` (`h > w`) descartaba las barras horizontales, y la alineación se medía solo sobre `y+h`. Fix: dos familias de señales — base inferior alineada (`y+h` constante, verticales) y base lateral alineada (`x` o `x+w` constante, horizontales) — con `orientacion` en las claves. El caso negativo se validó: barras verticales siguen dando `vertical`, no `horizontal` (la base lateral no está alineada en barras-v: los `x` difieren).
+
+**Hallazgo 2 — el pastel exigía densidad alta implícitamente:** la tolerancia `w≈h` del 15% rechazaba el donut ovalado (500x400 → 20%) y no distinguía el anillo hueco del pastel sólido. Fix: tolerancia 20% + la densidad DEL BLOB (área/bbox) como discriminador: pastel sólido ~0.78 (π/4 ≈ 0.785), donut con hueco típico < 0.7. El umbral se calibró con huecos de 28%→0.76 (casi pastel), 40%→0.65 (donut), 50%→0.55 (donut claro): 0.7 separa bien.
+
+**Hallazgo 3 — dark-mode invertía la lógica de "fondo blanco/tinta oscura":** `_tinta(gris < 200)` con fondo #1e1e1e y barras claras hacía TODO "tinta" → un blob gigante → indeterminado. Fix: `_es_modo_oscuro()` (luminancia W3C del color MODAL < 0.5 — el modal es robusto, no la media) + `_tinta(invertir=True)` (píxeles claros > 255-umbral), propagado a `_describir_simple` y `describir_determinista`; `check_contraste` usa `abs()` porque en oscuro la tinta es MÁS clara que el fondo (resta negativa). Regresión verificada: imagen blanca con outline negro NO se invierte (modal blanco).
+
+**Verificación:** 5 tests nuevos (58/58 del módulo, 401/401 totales); demo en claro intacta; dark+linea recta → `linea`; dark+barras-h → `barras horizontal`. Verificador 39 OK (2 FALLOS pre-existentes ajenos).
+
+**Lección:** una señal única por clase de gráfico (p. ej. "bases iguales") no cubre las variantes de orientación; el modo oscuro no es un caso aparte sino que INVARÍA la relación tinta/fondo: hay que detectar el fondo primero (color modal, no media) y adaptar el umbral y el signo del contraste. Los casos límite (donut casi sólido, zigzag) deben documentarse como límites conocidos, no silenciarse.

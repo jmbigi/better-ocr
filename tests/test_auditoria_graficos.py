@@ -19,9 +19,12 @@ from auditoria_graficos import (clasificar_tipo, describir_determinista,
                                 check_nitidez, check_resolucion,
                                 check_superposiciones, check_zoom_cortes,
                                 check_texto_pequeno, check_ruido,
+                                check_contraste_wcag, check_daltonismo,
+                                check_pie_slices, check_series_limit,
                                 _colores_series, _componentes, _ruido,
                                 _maxima_densidad, _tinta, auditar,
-                                vision_ia, _parsear_rubrica_vlm)
+                                vision_ia, _parsear_rubrica_vlm,
+                                describir_leyenda)
 
 
 def _imagen_con(dibujar, w=900, h=600):
@@ -85,6 +88,40 @@ def _con_leyenda_pegada():
     return _imagen_con(dib)
 
 
+def _leyenda_con_marcadores(con_titulo=True):
+    """Barras de 2 colores + leyenda derecha con marcadores y título."""
+    def dib(d):
+        d.rectangle([100, 400, 220, 560], fill=(52, 101, 164))
+        d.rectangle([280, 320, 400, 560], fill=(200, 30, 30))
+        if con_titulo:
+            for dx, dy in ((0, 0), (1, 0)):
+                d.text((840 + dx, 105 + dy), "Ventas", fill="black")
+        # entrada 1: marcador azul + texto
+        d.rectangle([830, 135, 846, 151], fill=(52, 101, 164))
+        for dx, dy in ((0, 0), (1, 0)):
+            d.text((855 + dx, 135 + dy), "Serie A", fill="black")
+        # entrada 2: marcador rojo + texto
+        d.rectangle([830, 175, 846, 191], fill=(200, 30, 30))
+        for dx, dy in ((0, 0), (1, 0)):
+            d.text((855 + dx, 175 + dy), "Serie B", fill="black")
+    return _imagen_con(dib)
+
+
+def _leyenda_incompleta():
+    """3 series de color pero leyenda solo con 2 entradas (falta etiqueta)."""
+    def dib(d):
+        d.rectangle([100, 400, 220, 560], fill=(52, 101, 164))
+        d.rectangle([280, 320, 400, 560], fill=(200, 30, 30))
+        d.rectangle([460, 360, 580, 560], fill=(30, 150, 70))
+        d.rectangle([830, 135, 846, 151], fill=(52, 101, 164))
+        for dx, dy in ((0, 0), (1, 0)):
+            d.text((855 + dx, 135 + dy), "Serie A", fill="black")
+        d.rectangle([830, 175, 846, 191], fill=(200, 30, 30))
+        for dx, dy in ((0, 0), (1, 0)):
+            d.text((855 + dx, 175 + dy), "Serie B", fill="black")
+    return _imagen_con(dib)
+
+
 def _sin_leyenda_2_series():
     def dib(d):
         d.rectangle([100, 400, 220, 560], fill=(200, 30, 30))
@@ -97,6 +134,33 @@ def _pastel():
         d.ellipse([200, 100, 700, 600], fill=(200, 30, 30), outline="black")
         d.ellipse([420, 100, 700, 600], fill=(30, 120, 200))
     return _imagen_con(dib)
+
+
+def _donut():
+    """Anillo con hueco central grande: pastel hueco (donut)."""
+    def dib(d):
+        d.ellipse([200, 100, 700, 500], fill=(200, 30, 30), outline="black")
+        d.ellipse([330, 230, 570, 370], fill="white")
+    return _imagen_con(dib)
+
+
+def _barras_horizontales():
+    """Barras horizontales: misma base LATERAL (x constante, w variable)."""
+    def dib(d):
+        for i, v in enumerate([120, 190, 80, 210]):
+            d.rectangle([80, 60 + i * 120, 80 + v, 140 + i * 120],
+                        fill=(52, 101, 164))
+    return _imagen_con(dib)
+
+
+def _fondo_oscuro():
+    """Barras claras sobre fondo oscuro (dark-mode): la tinta se invierte."""
+    img = Image.new("RGB", (900, 600), (30, 30, 30))
+    d = ImageDraw.Draw(img)
+    for i, v in enumerate([120, 190, 80, 210, 150]):
+        d.rectangle([130 + i * 150, 400 - v, 220 + i * 150, 400],
+                    fill=(90, 150, 220))
+    return img
 
 
 def _scatter():
@@ -202,10 +266,49 @@ class TestChecks(unittest.TestCase):
         leyenda = [h for h in res["hallazgos"] if h["tipo"] == "leyenda"]
         self.assertTrue(any("pegada" in h["mensaje"] for h in leyenda))
 
+    def test_leyenda_entradas_sin_marcador(self):
+        # texto sin swatches de color: no se puede asociar a la serie
+        res = describir_determinista(_con_leyenda_pegada())
+        self.assertTrue(any(h["tipo"] == "leyenda_marcador"
+                            for h in res["hallazgos"]))
+
     def test_sin_leyenda_con_series(self):
         res = describir_determinista(_sin_leyenda_2_series())
         self.assertEqual(res["n_series"], 2)
         self.assertTrue(any("sin leyenda" in h["mensaje"] for h in res["hallazgos"]))
+
+    def test_leyenda_describir_elementos(self):
+        # descripción de la leyenda: posición, caja, título, entradas con
+        # marcador de color y texto
+        res = describir_determinista(_leyenda_con_marcadores())
+        leyenda = res["leyenda"]
+        self.assertIsNotNone(leyenda)
+        self.assertEqual(leyenda["posicion"], "derecha")
+        self.assertIsNotNone(leyenda["titulo"])
+        self.assertEqual(leyenda["n_entradas"], 2)
+        colores = {e["color"] for e in leyenda["entradas"]}
+        self.assertIn("#2060a0", colores)  # azul cuantizado
+        self.assertIn("#c00000", colores)  # rojo cuantizado
+        for e in leyenda["entradas"]:
+            self.assertIsNotNone(e["marcador"])
+            self.assertIsNotNone(e["texto"])
+
+    def test_leyenda_sin_titulo(self):
+        res = describir_determinista(_leyenda_con_marcadores(con_titulo=False))
+        self.assertIsNone(res["leyenda"]["titulo"])
+        self.assertEqual(res["leyenda"]["n_entradas"], 2)
+
+    def test_leyenda_incompleta_series_sin_etiqueta(self):
+        # 3 series pero la leyenda solo tiene 2 entradas
+        res = describir_determinista(_leyenda_incompleta())
+        self.assertEqual(res["n_series"], 3)
+        self.assertEqual(res["leyenda"]["n_entradas"], 2)
+        self.assertTrue(any(h["tipo"] == "leyenda_entradas"
+                            for h in res["hallazgos"]))
+
+    def test_leyenda_describir_directa_sin_leyenda(self):
+        res = describir_determinista(_grafico_limpio())
+        self.assertIsNone(res["leyenda"])
 
     def test_resolucion_baja(self):
         img = Image.new("RGB", (300, 200), "white")
@@ -236,6 +339,32 @@ class TestTipoGrafico(unittest.TestCase):
         res = describir_determinista(_pastel())
         self.assertEqual(res["tipo"], "pastel")
 
+    def test_clasifica_donut(self):
+        # anillo con hueco central: pastel hueco, no pastel sólido
+        res = describir_determinista(_donut())
+        self.assertEqual(res["tipo"], "pastel")
+        self.assertTrue(res["claves_tipo"]["donut"])
+
+    def test_pastel_solido_no_es_donut(self):
+        res = describir_determinista(_pastel())
+        self.assertFalse(res["claves_tipo"]["donut"])
+
+    def test_clasifica_barras_horizontales(self):
+        # base lateral alineada (x constante), no base inferior
+        res = describir_determinista(_barras_horizontales())
+        self.assertEqual(res["tipo"], "barras")
+        self.assertEqual(res["claves_tipo"]["orientacion"], "horizontal")
+
+    def test_clasifica_barras_verticales(self):
+        res = describir_determinista(_grafico_limpio())
+        self.assertEqual(res["claves_tipo"]["orientacion"], "vertical")
+
+    def test_fondo_oscuro_detecta_y_clasifica(self):
+        # dark-mode: la máscara de tinta se invierte (datos claros)
+        res = describir_determinista(_fondo_oscuro())
+        self.assertTrue(res["modo_oscuro"])
+        self.assertEqual(res["tipo"], "barras")
+
     def test_clasifica_scatter(self):
         res = describir_determinista(_scatter())
         self.assertEqual(res["tipo"], "scatter")
@@ -249,6 +378,70 @@ class TestTipoGrafico(unittest.TestCase):
     def test_clasificar_tipo_directo_vacio(self):
         res = clasificar_tipo([], 900, 600, [])
         self.assertEqual(res["tipo"], "indeterminado")
+
+
+class TestAccesibilidadColor(unittest.TestCase):
+    """Checks basados en INVESTIGACION-VISUALIZACION.md: WCAG 1.4.11,
+    daltonismo (Machado 2009), pie <= 5 slices, max 4-5 series."""
+
+    def _series(self, colores):
+        return [{"color": c, "fraccion": 0.5} for c in colores]
+
+    def test_contraste_wcag_serie_palida(self):
+        fondo_blanco = np.full((100, 100, 3), 255, dtype=np.uint8)
+        series = self._series(["#fafac8"])  # amarillo pálido sobre blanco
+        h = check_contraste_wcag(fondo_blanco, series)
+        self.assertEqual(len(h), 1)
+        self.assertEqual(h[0]["tipo"], "contraste_wcag")
+        self.assertLess(h[0]["evidencia"]["series"][0]["ratio"], 3.0)
+
+    def test_contraste_wcag_serie_oscura_ok(self):
+        fondo_blanco = np.full((100, 100, 3), 255, dtype=np.uint8)
+        series = self._series(["#3465a4"])  # azul oscuro
+        h = check_contraste_wcag(fondo_blanco, series)
+        self.assertEqual(h, [])
+
+    def test_contraste_wcag_sin_series(self):
+        h = check_contraste_wcag(np.full((10, 10, 3), 255, dtype=np.uint8), [])
+        self.assertEqual(h, [])
+
+    def test_daltonismo_pares_confundibles(self):
+        # rojos cercanos: casi indistinguibles bajo protanopia/deuteranopia
+        series = self._series(["#c81e1e", "#a02020"])
+        h = check_daltonismo(series)
+        self.assertEqual(len(h), 1)
+        self.assertEqual(h[0]["tipo"], "daltonismo")
+
+    def test_daltonismo_rojo_azul_ok(self):
+        series = self._series(["#c81e1e", "#3465a4"])
+        h = check_daltonismo(series)
+        self.assertEqual(h, [])
+
+    def test_pie_con_muchos_slices(self):
+        series = self._series(["#c81e1e", "#3465a4", "#2ea043", "#f0c000",
+                               "#8b5cf6", "#14b8a6"])
+        h = check_pie_slices(series, "pastel")
+        self.assertEqual(len(h), 1)
+        self.assertEqual(h[0]["tipo"], "pie_slices")
+        # no aplica a barras
+        self.assertEqual(check_pie_slices(series, "barras"), [])
+
+    def test_pie_pocos_slices_ok(self):
+        series = self._series(["#c81e1e", "#3465a4"])
+        self.assertEqual(check_pie_slices(series, "pastel"), [])
+
+    def test_muchas_series(self):
+        series = self._series([f"#{i:02x}0000" for i in (10, 20, 30, 40, 50, 60)])
+        h = check_series_limit(series)
+        self.assertEqual(len(h), 1)
+        self.assertEqual(h[0]["tipo"], "series")
+        self.assertEqual(check_series_limit(series[:4]), [])
+
+    def test_luminancia_w3c_orden(self):
+        from auditoria_graficos import _luminancia_w3c
+        # el blanco tiene mayor luminancia que el negro
+        self.assertGreater(_luminancia_w3c((255, 255, 255)),
+                           _luminancia_w3c((0, 0, 0)))
 
 
 class TestVLM(unittest.TestCase):
