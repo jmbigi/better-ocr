@@ -358,3 +358,18 @@ Detalles verificados:
 - `scripts/opencode-sandbox.sh` no se ejecuta: requiere `bwrap` (bubblewrap) y user namespaces; su limitación verificada en el upstream (el runtime Bun de opencode crashea dentro de user namespace en este kernel) se documenta en el propio script y en el README del upstream.
 
 **Limitaciones declaradas:** los checks de PRUEBAS "numeración secuencial" y "lecciones citan pruebas" del upstream NO se portan: el `docs/PRUEBAS.md` de este proyecto es evidencia específica por secciones (no una tabla numerada del ruleset). El README local no adopta el listado de "36 errores de LLM" del upstream (es documentación del ruleset, no de este proyecto).
+
+## 16. Auditoría visual de gráficos (`auditoria_graficos.py` — 2026-08-16)
+
+**Qué es:** módulo de dos capas (patrón de `revision.py`): (1) determinista PIL+numpy — superposiciones de etiquetas, leyenda (ausente/cortada/sobre datos), zoom/recortes, nitidez, contraste, ruido, texto pequeño, resolución, tipo de gráfico y series por colores; (2) VLM opt-in (`--vision docbee|ollama`) con rúbrica. Detecta **layouts NxN (subplots)** por gutters y analiza cada panel + alineación/gutters/tamaños/título/márgenes, con **sugerencias** accionables. `chart_server.py` gana `POST /auditoria` (clave `image`, funciona con `--sin-modelo`).
+
+**Evidencia (P0.1, 2026-08-16):**
+
+- **Suite: 42 tests nuevos** (38 `test_auditoria_graficos.py` + 4 de `/auditoria` en `test_extraccion.py`). Total: **382/382 OK**.
+- **Verificador:** 40 OK, 0 FALLOS (tras el commit).
+- **Demo sintética (`--demo`):** gráfico con etiquetas "1.234" superpuestas x2 + leyenda pegada al borde derecho → detecta "posible superposicion de etiquetas (densidad 70%)", "leyenda superpuesta a la zona de datos (37%)", "3 pares de elementos con bboxes solapados" y genera sugerencias. La leyenda pegada NO se confunde con un panel (el filtro de columnas espurias la descarta).
+- **Grids sintéticos:** 2x2 alineado → detecta 4 paneles de tipo barras, sin hallazgos de layout; ejes desalineados en una fila (25 px) → `alineacion_ejes`; grid 1x3 con gutters 14/40 px → `gutter_irregular`; panel vacío → `panel_vacio` (problema); sin título general → `titulo` (aviso).
+- **Casos límite verificados:** imagen vacía (sin hallazgos), imagen negra (nitidez, sin crash), ruta inexistente (FileNotFoundError explícito), gráfico único de barras (NO es multi: los huecos entre barras no generan gutters falsos porque el eje X los cruza), scatter/pastel/barras/indeterminado clasificados, colisiones de blobs.
+- **Calibración de heurísticas (lecciones):** sólidos extensos (barras) excluidos de la densidad de "texto" vía ventana local 8×8 (interior de barra = 100%, eje fino = 37%, glifo ~50%); la ventana de densidad se ajusta a la altura mediana de los glifos; umbral dinámico 15% del máximo para descartar filas/cols espurias (una leyenda pegada no es un panel).
+
+**Diseño basado en investigación verificada:** `docs/INVESTIGACION-VISUALIZACION.md` (herramientas gratuitas sin cuentas: DePlot/UniChart/WebPlotDigitizer/BRISQUE/piq/Photopea/Qwen2.5-VL...; errores humanos: ejes truncados, dual axis, pie ≥6, >8 colores, chartjunk; errores de IAs: alucinación de valores ChartVRBench 20-56%, lecturas de eje, OCR; principios: Cleveland & McGill, WCAG 1.4.3/1.4.11, baseline cero, 4-5 series máx, small multiples).

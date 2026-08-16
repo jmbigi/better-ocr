@@ -116,6 +116,7 @@ def crear_handler(modelo, estado):
                 "modelo": "PP-Chart2Table" if modelo else "no cargado (--sin-modelo)",
                 "modos": ["auto", "texto", "graficos", "doc", "objetos", "humano"],
                 "revision": True,
+                "auditoria": True,
                 "uptime_s": round(time.time() - estado["inicio"]),
             })
 
@@ -196,9 +197,30 @@ def crear_handler(modelo, estado):
                 vision_modelo=datos.get("vision_modelo", "gemma3:4b"))
             self._enviar_json(200, resultado)
 
+        def _procesar_auditoria(self, datos):
+            """POST /auditoria: auditoría visual de gráficos/charts.
+
+            Sin modelos: análisis determinista (superposiciones, leyenda,
+            zoom, nitidez, contraste, layout NxN, sugerencias) + descripción
+            VLM opt-in (--vision docbee|ollama). No marca actividad de
+            inferencia del modelo pesado.
+            """
+            import auditoria_graficos
+
+            if not os.path.exists(datos["image"]):
+                self._enviar_json(400, {"ok": False,
+                                        "error": f"el archivo no existe: {datos['image']}"})
+                return
+            LOG.info("Auditoria de: %s (vision: %s)",
+                     datos["image"], datos.get("vision") or "off")
+            resultado = auditoria_graficos.auditar(
+                datos["image"], vision=datos.get("vision"),
+                device=datos.get("vision_device", "gpu"))
+            self._enviar_json(200, resultado)
+
         def do_POST(self):
-            if self.path not in ("/chart", "/vision", "/revision"):
-                self._enviar_json(404, {"ok": False, "error": "Solo GET /health o POST /chart o POST /vision o POST /revision"})
+            if self.path not in ("/chart", "/vision", "/revision", "/auditoria"):
+                self._enviar_json(404, {"ok": False, "error": "Solo GET /health o POST /chart o POST /vision o POST /revision o POST /auditoria"})
                 return
 
             clave = "archivo" if self.path == "/revision" else "image"
@@ -209,6 +231,9 @@ def crear_handler(modelo, estado):
 
             if self.path == "/revision":
                 self._procesar_revision(datos)
+                return
+            if self.path == "/auditoria":
+                self._procesar_auditoria(datos)
                 return
 
             # Marcar actividad y bloquear el cierre por inactividad

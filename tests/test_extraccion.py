@@ -357,6 +357,52 @@ class TestChartServer(unittest.TestCase):
         self.assertEqual(codigo, 400)
         self.assertIn("reglas", cuerpo["error"])
 
+    def test_auditoria_ok(self):
+        """POST /auditoria sobre la demo del módulo: análisis determinista."""
+        ruta = "ejemplos/grafico_auditoria_demo.png"
+        if not os.path.exists(ruta):
+            self.skipTest("demo no generada")
+        codigo, cuerpo = self._req("/auditoria", {"image": ruta})
+        self.assertEqual(codigo, 200)
+        self.assertIn("hallazgos", cuerpo)
+        self.assertIn("sugerencias", cuerpo)
+        self.assertIsInstance(cuerpo["hallazgos"], list)
+        self.assertIsInstance(cuerpo["sugerencias"], list)
+        self.assertIn("resumen", cuerpo)
+
+    def test_auditoria_archivo_inexistente(self):
+        codigo, cuerpo = self._req("/auditoria", {"image": "/no/existe.png"})
+        self.assertEqual(codigo, 400)
+        self.assertIn("no existe", cuerpo["error"])
+
+    def test_auditoria_requiere_clave_image(self):
+        codigo, cuerpo = self._req("/auditoria", {"archivo": "x.png"})
+        self.assertEqual(codigo, 400)
+        self.assertIn("clave 'image'", cuerpo["error"])
+
+    def test_auditoria_sin_modelo_no_usa_el_vlm_pesado(self):
+        """/auditoria determinista funciona con --sin-modelo (no depende
+        del modelo de charts ni del VLM)."""
+        ruta = "ejemplos/grafico_auditoria_demo.png"
+        if not os.path.exists(ruta):
+            self.skipTest("demo no generada")
+        estado = {"inicio": time.time(), "ultima_actividad": time.time(), "ocupado": False}
+        server = HTTPServer(("127.0.0.1", 8128), chart_server.crear_handler(None, estado))
+        hilo = threading.Thread(target=server.serve_forever, daemon=True)
+        hilo.start()
+        try:
+            datos = json.dumps({"image": ruta}).encode()
+            req = urllib.request.Request("http://127.0.0.1:8128/auditoria", data=datos,
+                                         headers={"Content-Type": "application/json"})
+            with urllib.request.urlopen(req, timeout=10) as r:
+                cuerpo = json.loads(r.read().decode())
+            self.assertEqual(cuerpo["multi_panel"], None)
+            self.assertIn("hallazgos", cuerpo)
+        finally:
+            server.shutdown()
+            server.server_close()
+            hilo.join(timeout=5)
+
     def test_chart_sin_modelo_503(self):
         estado = {"inicio": time.time(), "ultima_actividad": time.time(), "ocupado": False}
         server = HTTPServer(("127.0.0.1", 8126), chart_server.crear_handler(None, estado))

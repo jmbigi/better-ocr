@@ -465,3 +465,19 @@
 - Test de cumplimiento del ruleset: AGENTS.md responde "13 P0 y 21 P1" (grep: 13 `^### P0`, 21 `^### P1`).
 
 **Lección:** la sincronización del ruleset es un momento de auditoría: los checks nuevos (rutas de usuario, fsck, claves API) se corren sobre TODO el repo, no solo sobre el diff; los hallazgos se anonimizan/reportan al instante (P0.11).
+
+## 37. Auditoría de gráficos: heurísticas que fallan y cómo calibrarlas (2026-08-16)
+
+**Contexto:** construcción de `auditoria_graficos.py` (dos capas: determinista PIL+numpy + VLM opt-in) con detección de layouts NxN. Los tests con imágenes sintéticas PIL expusieron 4 trampas de diseño:
+
+**Hallazgo 1 — la densidad de tinta no distingue etiquetas superpuestas de barras sólidas:** un rectángulo relleno da densidad 100% sin ser superposición (es el dato; proportional ink). Fix en dos pasos: (a) máscara de "sólidos" por ventana local 8×8 (interior de barra 100%, eje fino 37%, glifo ~50%) con la fórmula CORRECTA de integral image (los slices desplazados en 1 fila/columna daban desfase silencioso — reescrito con indexado por arrays); (b) los sólidos solo se excluyen si su componente es EXTENSO (≥0.1% del lienzo): un glifo engrosado también es "sólido local" pero pequeño. La ventana de densidad debe ser del tamaño del TEXTO real (altura mediana de glifos), no un tamaño fijo.
+
+**Hallazgo 2 — los gutters de un grid NxN se confunden con huecos internos del gráfico:** las columnas entre barras son bandas vacías. Fix: perfiles sobre el rango central 5-95% con umbral estricto 0.003 — el EJE X cruza los huecos internos (una línea de 3px en 540 filas = 0.56% > 0.3%) y los descarta; un gutter real está 100% vacío.
+
+**Hallazgo 3 — el título del grid es un falso panel, y la leyenda pegada salva filas espurias:** el título (franja ancha y chata) sobrevive al filtro de contenido; la leyenda (cobertura 4%) "salva" la fila de etiquetas (0.2%). Fix: (a) descartar filas/cols con proporción extrema (>8:1) o sin contenido; (b) filtrar COLUMNAS antes que FILAS; (c) umbral dinámico = 15% de la cobertura máxima del grid (una celda espuria no es un panel equivalente).
+
+**Hallazgo 4 — el texto bitmap de PIL es diminuto (glifos de 17-61 px):** los umbrales de "blob de texto" pensados para fuentes reales (≥135 px) excluían toda la leyenda de la demo. Fix: mínimo 0.006% del lienzo (~30 px) — sigue excluyendo ruido de 1-2 px.
+
+**Verificación:** 38 tests unitarios del módulo + 4 del endpoint `/auditoria` en `test_extraccion.py` (382/382 totales); criterios calibrados contra la demo real (etiquetas superpuestas, leyenda pegada) y grids sintéticos (alineación, gutters irregulares, panel vacío, sin título). `bash scripts/verificar-proyecto.sh` → 40 OK.
+
+**Lección:** las heurísticas de visión por computadora necesitan contrafactuales (¿qué pasa con un gráfico único que parece grid? ¿con un texto engrosado?) ANTES de fijar umbrales: cada umbral debe calibrarse contra el caso positivo Y el negativo, y los tests sintéticos son la herramienta.
