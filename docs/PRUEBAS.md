@@ -337,3 +337,24 @@ Detalles verificados:
 - **Wayback CDX en `empresas.py` sin --wayback:** señales de historial gratuitas (n capturas, primera/última) integradas en `sintesis` ("web con historial en Wayback desde 2015-05-05 (112 capturas)").
 
 **Suite:** 12 tests `test_rns.py` + 8 nuevos en `test_empresas.py` (3 RNS + 5 Wayback: parser CDX con fixture REAL de la API, exclusión de imágenes, prioridad home/contacto, límite, síntesis). Total: **340/340 OK**.
+
+## 15. Sincronización del ruleset better-ai (P0.13, P1.19-P1.21, guardarraíles — 2026-08-16)
+
+**Qué es:** sincronización de la copia del conjunto de reglas [better-ai](https://github.com/jmbigi/better-ai) incrustada en este proyecto con el upstream (fuente: `raw.githubusercontent.com/jmbigi/better-ai/main`, verificada en vivo 2026-08-16).
+
+**Cambios del ruleset (verificados por diff contra el upstream):**
+- Reglas nuevas en `AGENTS.md`: **P0.13** (anti prompt-injection), **P1.19** (evita fallbacks: falla explícito, no enmascares errores), **P1.20** (actualiza las lecciones aprendidas), **P1.21** (divide y vencerás: prototipo aislado antes de integrar) y **P1.8** endurecida ("Nunca desobedezcas": cumple al pie de la letra, excepción P0 con explicación y consulta). Conteo verificado: **13 P0 y 21 P1** en `AGENTS.md` (antes 12 P0 / 18 P1).
+- `CHECKLIST.md` actualizado (nuevas secciones anti prompt-injection, fallbacks, lecciones aprendidas y divide y vencerás; IDs citados verificados contra `AGENTS.md`).
+- `opencode.json` reemplazado por el del upstream (superconjunto verificado por diff: 245 patrones bash = 159 `deny` + 85 `ask` + 1 `allow`, antes 175; añade denies de `.ssh`/`.aws`/`id_rsa`/`id_ed25519`/`*.pem`/`*credentials*` en `cat`/`less`/`head`/`tail`/`grep`/redirecciones y en `read`/`edit`; `enabled_providers` sin cambios: `["opencode", "opencode-go"]`). Sin patrones locales perdidos (diff: solo-local = ∅).
+- Archivos nuevos: `docs/REGLAS-COMPLETAS.md` (684 líneas, IDs y títulos de reglas idénticos a `AGENTS.md` verificados por diff), `.opencode/agents/security-auditor.md` y `.opencode/agents/code-reviewer.md` (solo lectura: `edit: deny`, `mode: subagent`), `scripts/probar-denies.sh` (red-team de los denies) y `scripts/opencode-sandbox.sh` (sandbox bubblewrap).
+- `scripts/verificar-proyecto.sh` fusionado: checks locales (sintaxis de los 13 módulos, suite unitaria, referencias del proyecto) + checks nuevos del upstream (13 P0/21 P1, IDs/títulos idénticos en REGLAS-COMPLETAS, 245 patrones con 159 deny/85 ask, read/edit bloquean claves, `enabled_providers`, pares críticos deny, mini-matcher "ningún ask anula un deny", seguridad con `ipaddress` y rutas `/home/<usuario>/`, formatos de claves API, sin eval/exec, agentes de solo lectura, fsck, HEAD remoto).
+- `.gitignore` fusionado (entradas de seguridad del upstream: `.env`/`.env.*` con `!.env.example`, `*.db`, `node_modules/`, `.pytest_cache/`; se conservan las entradas locales: salidas de scripts y RNS).
+
+**Verificación (todo ejecutado el 2026-08-16, salida real):**
+- `python3 -m py_compile` de los 13 módulos → OK.
+- `python3 -m unittest discover -s tests` → **340/340 OK**.
+- `bash scripts/verificar-proyecto.sh` → **47 OK, 0 FALLOS**.
+- `bash scripts/probar-denies.sh` → ver resultado en la lección 36 (red-team contra el matcher real de opencode, config mínima aislada sin AGENTS.md, variantes canónicas seguras con dummies en /tmp; los denies con `|` son STATIC por diseño — matcher de opencode 1.18.x no los soporta).
+- `scripts/opencode-sandbox.sh` no se ejecuta: requiere `bwrap` (bubblewrap) y user namespaces; su limitación verificada en el upstream (el runtime Bun de opencode crashea dentro de user namespace en este kernel) se documenta en el propio script y en el README del upstream.
+
+**Limitaciones declaradas:** los checks de PRUEBAS "numeración secuencial" y "lecciones citan pruebas" del upstream NO se portan: el `docs/PRUEBAS.md` de este proyecto es evidencia específica por secciones (no una tabla numerada del ruleset). El README local no adopta el listado de "36 errores de LLM" del upstream (es documentación del ruleset, no de este proyecto).

@@ -20,8 +20,9 @@ Crear un procedimiento documentado, reproducible y validado en ejecución real p
 | Archivo | Descripción |
 | :--- | :--- |
 | `AGENTS.md` | **Reglas de IA del proyecto** (conjunto [better-ai](https://github.com/jmbigi/better-ai), CC BY-SA 4.0, con reglas específicas de este proyecto añadidas). opencode lo carga automáticamente en cada sesión. |
-| `opencode.json` | **Guardarraíles deterministas** para opencode: `deny` de comandos destructivos (`rm -rf`, `git reset --hard`, etc.) y edición/lectura de `.env`. Se aplican en runtime sin depender del modelo. |
+| `opencode.json` | **Guardarraíles deterministas** para opencode: **245 patrones** de permisos bash (159 `deny`, 85 `ask`, 1 `allow` por defecto) que bloquean comandos destructivos, acceso a `.env`/`~/.ssh`/`~/.aws`/claves (`id_rsa`, `*.pem`, `*credentials*`) por comandos comunes (`cat`/`less`/`head`/`tail`/`grep`/redirecciones) y ediciones de `.env`; `read`/`edit` deniegan también rutas de claves y credenciales; `enabled_providers` solo carga los proveedores de modelos permitidos. Se aplican en runtime sin depender del modelo. |
 | `CHECKLIST.md` | Checklist de verificación pre-entrega (imprimible). |
+| `.opencode/agents/` | Subagentes de solo lectura (`edit: deny`) para revisión cruzada antes de entregar: `security-auditor.md` (secretos/datos personales/riesgos, P0.6/P0.9/P0.10/P0.11) y `code-reviewer.md` (alcance, coherencia, verificabilidad). Se invocan con `@security-auditor` / `@code-reviewer`. |
 | `README.md` | Este archivo: objetivos del proyecto y referencias a sus archivos. |
 | `extractor_final.py` | Script principal validado: extrae la tabla del gráfico con `ChartParsing` y genera `datos_extraidos.csv` + `salida_bruta.json` para depuración. Expone `obtener_markdown()`, `markdown_a_df()` y `validar_imagen()` (valida existencia + firma mágica antes de cargar el modelo) reutilizables. Por defecto usa la imagen demo (`ejemplos/grafico_demo.png`). |
 | `ocr_rapido.py` | **Ruta rápida en cascada:** PP-OCRv6 + emparejamiento geométrico por bboxes (año↔valor) con gate de plausibilidad. Si el gate falla, el llamador cae al VLM `ChartParsing` (lento pero exacto). Validado 12/12 valores en 2 charts en ~1 GB de RAM. |
@@ -49,9 +50,12 @@ Crear un procedimiento documentado, reproducible y validado en ejecución real p
 | `scripts/bateria_360.py` | **Batería 360°:** compara VLM locales (docbee / ollama) en 6 dimensiones (QA UI, interpretación, valores, objetos, descripción, documento) con las mismas imágenes y prompts; scoring automático + rúbrica humana. |
 | `scripts/hooks/pre-commit` | Hook git local que ejecuta la verificación antes de cada commit (instalación: `cp scripts/hooks/pre-commit .git/hooks/pre-commit`). |
 | `docs/GUIA_OCR_VISION.md` | **Documento general reutilizable** (se puede pegar en otros proyectos). Incluye Chart OCR, Text OCR y AI Vision con PaddleOCR. |
+| `docs/REGLAS-COMPLETAS.md` | Normativa detallada del conjunto de reglas [better-ai](https://github.com/jmbigi/better-ai): regla por regla, qué error del LLM previene, cómo verificarla y las fuentes de la investigación. |
 | `docs/LECCIONES-APRENDIDAS.md` | Memoria del proyecto: fallos, hallazgos y soluciones (referenciada desde `AGENTS.md`). |
+| `scripts/probar-denies.sh` | **Red-team de los guardarraíles** (`opencode.json`): prueba cada `deny` contra el matcher REAL de opencode (config mínima aislada en /tmp, sin AGENTS.md) con variantes canónicas seguras (dummies); falla si algún deny no bloquea. Uso: `bash scripts/probar-denies.sh` (lote de 24; `--solo <substring>` para uno). |
+| `scripts/opencode-sandbox.sh` | **Sandbox opcional con bubblewrap**: ejecuta opencode con toda la máquina en solo lectura salvo el workspace (red bloqueada salvo `--net`); capa determinista de sistema operativo por encima de los deny. Requiere `bwrap` y user namespaces. |
 | `ejemplos/grafico_demo.png` | Imagen de prueba oficial de PaddleOCR (gráfico de ejemplo, descargada del repositorio oficial). |
-| `.gitignore` | Excluye `__pycache__/`, entornos virtuales y las salidas generadas por los scripts. |
+| `.gitignore` | Excluye `__pycache__/`, entornos virtuales, secretos (`.env`, claves), bases de datos locales (`*.db`, `rns.db`), `node_modules/` y las salidas generadas por los scripts. |
 
 ## Uso rápido
 

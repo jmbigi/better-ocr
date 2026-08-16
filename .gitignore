@@ -1,11 +1,42 @@
-__pycache__/
-*.py[cod]
-*.egg-info/
+# Entorno y dependencias
+node_modules/
 .venv/
 venv/
 env/
+__pycache__/
+*.py[cod]
+*.egg-info/
 
-# Salidas generadas por los scripts
+# Secretos (P0.6/P0.10)
+.env
+.env.*
+!.env.example
+
+# Bases de datos locales
+*.db
+*.sqlite
+*.sqlite3
+
+# Artefactos y cache
+.pytest_cache/
+.coverage
+dist/
+build/
+*.log
+
+# Backups
+backup-*/
+
+# Editores y OS
+.idea/
+.vscode/
+*.swp
+*.swo
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Salidas generadas por los scripts (better-ocr)
 salida_bruta.json
 datos_extraidos.csv
 ocr_salida_bruta.json

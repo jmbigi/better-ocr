@@ -137,7 +137,7 @@
 
 **Contexto:** prueba mínima de la alternativa en Rust (sin Python) en esta máquina (7.7 GB RAM, 9 GiB swap añadido por el programador como root, CPU).
 
-**Build:** `cargo build --release -p deepseek-ocr-cli` con rustup (perfil minimal, instalado en `~/.cargo`). **Dos fallos de build con causas distintas:** (1) `Bus error (señal 7)` del linker (rust-lld/LLVM): el repo se clonó en `/tmp` que es **tmpfs de 3.9 GB** — el enlazado llena tmpfs y muere; solución: `CARGO_TARGET_DIR` y `TMPDIR` en disco (`/home/admin/dsocr-target`). (2) `ring` build script falló una vez por presión de disco mientras el programador creaba `/swapfile2` (4 GiB): transitorio, recompilando pasó.
+**Build:** `cargo build --release -p deepseek-ocr-cli` con rustup (perfil minimal, instalado en `~/.cargo`). **Dos fallos de build con causas distintas:** (1) `Bus error (señal 7)` del linker (rust-lld/LLVM): el repo se clonó en `/tmp` que es **tmpfs de 3.9 GB** — el enlazado llena tmpfs y muere; solución: `CARGO_TARGET_DIR` y `TMPDIR` en disco (directorio de trabajo del perfil de usuario, fuera de `/tmp`). (2) `ring` build script falló una vez por presión de disco mientras el programador creaba `/swapfile2` (4 GiB): transitorio, recompilando pasó.
 
 **Resultado real (grafico_demo.png, `--model paddleocr-vl-q4k --device cpu --max-new-tokens 400`):** 12/12 valores + 6/6 años **exactos** (q4k NO degradó los dígitos en este caso, contrariamente a la predicción inicial). Carga del modelo 8.2 s. **~1200 s de inferencia** (prefill visión 0.43 tok/s en 477 tokens = 1099 s; generation 134 tokens a 1.4 tok/s = 96 s). Sin OOM gracias al swap (9 GiB). RAM real no medida (el monitor VmRSS leyó el PID del wrapper, no el proceso — monitoreo no fiable con `&` dentro del shell; medir con subproceso directo).
 
@@ -367,7 +367,7 @@
 
 **Hallazgo 2 — las cifras de la documentación se desactualizaron durante el desarrollo:** PRUEBAS §9.3 y el Estado del README decían "219/219 tests" cuando la suite real era de 211 (la cifra se escribió durante una iteración intermedia). Fix: 211 en ambos sitios, verificados contra `unittest` real. Lección: las cifras de tests en docs se escriben DESPUÉS de la corrida final, nunca de memoria.
 
-**Hallazgo 3 — auditoría P0.9 obligatoria antes de commit:** el dif a commitear incluía una ruta personal del programador (`/home/kubuntu/mama/cuidadores/ENVIO/`) citada en la lección 28 y el nombre de un directorio temporal que la evocaba. Se anonimizó en LECCIONES y PRUEBAS ("carpeta de envío del programador, ámbito personal" + directorio temporal `/var/tmp`). Auditoría de cierre: grep de rutas personales, nombres, emails e IPs sobre todos los archivos versionables → limpio (P0.9/P0.10). El contenido de celdas reales (nombres, proveedores) nunca entró al repo: solo resúmenes numéricos agregados.
+**Hallazgo 3 — auditoría P0.9 obligatoria antes de commit:** el dif a commitear incluía una ruta personal del programador (carpeta de envío, ámbito personal) citada en la lección 28 y el nombre de un directorio temporal que la evocaba. Se anonimizó en LECCIONES y PRUEBAS ("carpeta de envío del programador, ámbito personal" + directorio temporal `/var/tmp`). Auditoría de cierre: grep de rutas personales, nombres, emails e IPs sobre todos los archivos versionables → limpio (P0.9/P0.10). El contenido de celdas reales (nombres, proveedores) nunca entró al repo: solo resúmenes numéricos agregados.
 
 **Lección:** el cierre de una entrega incluye tres pasos que se hacen SIEMPRE juntos: auditoría de datos personales (grep + anonimización), verificación de cifras citadas contra la ejecución final, y prueba del camino recién tocado (la comparación ODS era código nuevo sin test).
 
@@ -447,3 +447,21 @@
 **Hallazgo 2 — tras el fallo del reto, la recarga a veces limpia la sesión:** si los N intentos del reto fallan, se recarga la página y se re-evalúa si el ancla sigue: Google a veces deja pasar la sesión tras varios intentos + reload (sesión limpia). Es un fallback barato: no empeora el estado (ya era "captcha") y no toca captcha_web.py.
 
 **Lección:** las mejoras de captcha se hacen en el orquestador con cambios pequeños y medibles; el stack interno no se toca sin campaña de medición (lecciones 20-27: los cambios de config no mejoraron la tasa del 43%).
+
+## 36. Sincronización del ruleset better-ai: reglas nuevas y guardarraíles ampliados (2026-08-16)
+
+**Contexto:** el upstream de [better-ai](https://github.com/jmbigi/better-ai) agregó reglas nuevas (P0.13 anti prompt-injection, P1.19 evita fallbacks, P1.20 lecciones, P1.21 divide y vencerás; P1.8 endurecida) y amplió `opencode.json` (245 patrones bash: 159 deny/85 ask, denies de `.ssh`/`.aws`/claves). Se sincronizó la copia del ruleset incrustada en este proyecto conservando la sección específica de extract-charts.
+
+**Hallazgo 1 — los checks de seguridad nuevos detectan lo que los viejos no veían:** el check de rutas de usuario (`/home/<usuario>/`) del upstream encontró DOS rutas personales ya commiteadas en LECCIONES-APRENDIDAS.md (lección 8: ruta de trabajo del perfil de usuario de otra máquina; lección 28: ruta personal de la carpeta de envío citada como ejemplo). Se anonimizaron (P0.9/P0.11, reportado al programador). Lección: el grep local viejo (`\.ssh/`, IPs) no cubría rutas `/home/...`; los checks del upstream están más probados.
+
+**Hallazgo 2 — `git fsck --unreachable` encontró 2 objetos huérfanos:** una versión VIEJA de `captcha_web.py` (anterior al stack VLM/grid, sin secretos) y su árbol — restos de rewrites pasados. Contenido verificado (diff contra el archivo actual) antes de decidir; el programador aprobó `git gc --prune=now` (el propio opencode.json marca `git gc *` como `ask`). El check fsck del upstream se conserva como higiene futura.
+
+**Hallazgo 3 — el check de rutas del verificador daba falsos positivos con URLs:** el regex local (sin exigir extensión `.md`/`.sh`) tomaba rutas de URLs externas de REGLAS-COMPLETAS.md (documentación de opencode, claude, flathub y NASA FPrime) como rutas locales. Fix: quitar URLs (`https?://\S+`) antes del scan. El upstream no lo padece porque su regex exige `.md|.sh`.
+
+**Verificación (evidencia real):**
+- Red-team `bash scripts/probar-denies.sh` (matcher REAL de opencode, config mínima aislada en /tmp sin AGENTS.md, variantes canónicas seguras con dummies): 7 lotes → **BLOQUEADOS 154, NO BLOQUEADOS 0, INCONCLUSOS 0**; 5 denies STATIC (pipes a `bash`/`sh`, el matcher de opencode 1.18.x no los soporta — limitación documentada del upstream). TODO OK.
+- `python3 -m py_compile` de los 13 módulos → OK. `python3 -m unittest discover -s tests` → **340/340 OK**.
+- `bash scripts/verificar-proyecto.sh` → 39 OK, 1 FALLO (el "árbol limpio", esperado antes del commit; en verde tras el commit).
+- Test de cumplimiento del ruleset: AGENTS.md responde "13 P0 y 21 P1" (grep: 13 `^### P0`, 21 `^### P1`).
+
+**Lección:** la sincronización del ruleset es un momento de auditoría: los checks nuevos (rutas de usuario, fsck, claves API) se corren sobre TODO el repo, no solo sobre el diff; los hallazgos se anonimizan/reportan al instante (P0.11).
