@@ -11,8 +11,8 @@ from unittest.mock import patch, MagicMock
 
 from descarga_musica import (
     archivos_mp3, construir_url_descarga, descargar_archivo,
-    descargar_lista, demo, buscar_archive, listar_fuentes,
-    PIEZAS_DEMO, DIR_MUSICA,
+    descargar_lista, descargar_partitura, demo, buscar_archive,
+    listar_fuentes, PIEZAS_DEMO, DIR_MUSICA,
 )
 
 # Metadata real de Archive.org (Bach Goldberg Variations), verificada
@@ -234,6 +234,88 @@ class TestBuscarArchive(unittest.TestCase):
         resultados = buscar_archive("Bach")
         self.assertEqual(len(resultados), 1)
         self.assertEqual(resultados[0]["identifier"], "test1")
+
+
+class TestPartituras(unittest.TestCase):
+
+    def test_piezas_con_partitura(self):
+        con_pdf = [p for p in PIEZAS_DEMO if "partitura" in p]
+        self.assertEqual(len(con_pdf), 3)
+        nombres = [p["titulo"] for p in con_pdf]
+        self.assertIn("Goldberg Variations BWV 988 (completas)", nombres)
+        self.assertIn("Piano Sonata No. 14 'Claro de Luna'", nombres)
+        self.assertIn("Clair de Lune", nombres)
+
+    def test_piezas_sin_partitura(self):
+        sin_pdf = [p for p in PIEZAS_DEMO if "partitura" not in p]
+        self.assertEqual(len(sin_pdf), 7)
+
+    @patch("descarga_musica.descargar_archivo")
+    def test_descargar_partitura_ok(self, mock_descargar):
+        mock_descargar.return_value = True
+        ok = descargar_partitura(
+            "BeethovenLv/O27/moonlight/moonlight-a4.pdf",
+            "/tmp/moonlight.pdf")
+        self.assertTrue(ok)
+        mock_descargar.assert_called_once_with(
+            "https://www.mutopiaproject.org/ftp/"
+            "BeethovenLv/O27/moonlight/moonlight-a4.pdf",
+            "/tmp/moonlight.pdf")
+
+    def test_descargar_partitura_none(self):
+        ok = descargar_partitura(None, "/tmp/test.pdf")
+        self.assertFalse(ok)
+
+    @patch("descarga_musica.descargar_archivo")
+    def test_descargar_partitura_vacia(self, mock_descargar):
+        ok = descargar_partitura("", "/tmp/test.pdf")
+        self.assertFalse(ok)
+        mock_descargar.assert_not_called()
+
+    @patch("descarga_musica.descargar_archivo")
+    @patch("descarga_musica.descargar_partitura")
+    @patch("descarga_musica.obtener_metadata")
+    def test_descarga_con_partitura(self, mock_metadata, mock_partitura,
+                                   mock_archivo):
+        mock_metadata.return_value = METADATA_GOLDBERG
+        mock_archivo.return_value = True
+        mock_partitura.return_value = True
+        items = [{
+            "titulo": "Test",
+            "identifier": "BachGoldbergVariations",
+            "partitura": "BachJS/BWV988/bwv-988-aria/bwv-988-aria-a4.pdf",
+        }]
+        with tempfile.TemporaryDirectory() as tmpdir:
+            exitosas, fallidas = descargar_lista(
+                items, tmpdir, con_partituras=True)
+            self.assertEqual(exitosas, 1)
+            mock_partitura.assert_called_once()
+
+    @patch("descarga_musica.descargar_archivo")
+    @patch("descarga_musica.descargar_partitura")
+    @patch("descarga_musica.obtener_metadata")
+    def test_descarga_sin_partituras(self, mock_metadata, mock_partitura,
+                                    mock_archivo):
+        mock_metadata.return_value = METADATA_GOLDBERG
+        mock_archivo.return_value = True
+        items = [{
+            "titulo": "Test",
+            "identifier": "BachGoldbergVariations",
+            "partitura": "BachJS/BWV988/bwv-988-aria/bwv-988-aria-a4.pdf",
+        }]
+        with tempfile.TemporaryDirectory() as tmpdir:
+            exitosas, fallidas = descargar_lista(
+                items, tmpdir, con_partituras=False)
+            self.assertEqual(exitosas, 1)
+            mock_partitura.assert_not_called()
+
+    @patch("descarga_musica.descargar_lista")
+    def test_demo_sin_partituras(self, mock_lista):
+        mock_lista.return_value = (10, 0)
+        demo(dry_run=True, con_partituras=False)
+        args = mock_lista.call_args
+        # con_partituras es el 4to argumento posicional
+        self.assertFalse(args[0][3])
 
 
 if __name__ == "__main__":

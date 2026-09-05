@@ -407,15 +407,15 @@ def listar_fuentes():
 
 def main():
     parser = argparse.ArgumentParser(
-        description="Descarga musica clasica gratuita y legal",
+        description="Descarga musica clasica gratuita y legal + partituras PDF",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Ejemplos:
-  python3 descarga_musica.py demo                 # 10 piezas demo
+  python3 descarga_musica.py demo                 # audio + PDFs
   python3 descarga_musica.py demo --dry-run       # solo mostrar URLs
+  python3 descarga_musica.py demo --sin-partituras  # solo audio
   python3 descarga_musica.py buscar "Bach piano"  # busqueda libre
   python3 descarga_musica.py buscar "Vivaldi" --limite 5
-  python3 descarga_musica.py buscar "Mozart" --directorio /tmp/musica
   python3 descarga_musica.py listar-fuentes       # fuentes disponibles
 """,
     )
@@ -427,6 +427,8 @@ Ejemplos:
                         help="Directorio destino (default: musica/)")
     p_demo.add_argument("--dry-run", action="store_true",
                         help="Solo muestra URLs, no descarga")
+    p_demo.add_argument("--sin-partituras", action="store_true",
+                        help="No descargar partituras PDF de Mutopia")
 
     # buscar
     p_buscar = sub.add_parser("buscar", help="Busca y descarga por consulta")
@@ -444,7 +446,8 @@ Ejemplos:
     args = parser.parse_args()
 
     if args.comando == "demo":
-        demo(args.directorio, args.dry_run)
+        con_partituras = not args.sin_partituras
+        demo(args.directorio, args.dry_run, con_partituras)
     elif args.comando == "buscar":
         print(f"Buscando: '{args.query}' en Internet Archive...")
         resultados = buscar_archive(args.query, args.limite)
