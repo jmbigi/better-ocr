@@ -1,18 +1,22 @@
 #!/usr/bin/env python3
-"""Descarga de musica clasica gratuita y legal desde Internet Archive.
+"""Descarga de musica clasica gratuita y legal desde Internet Archive
+y partituras PDF desde Mutopia Project.
 
 Por que existe: Faristol necesita extractos de audio de dominio publico para
 demostraciones y pruebas. Las fuentes principales (Musopen 403, Musiqpub
 caido) requieren autenticacion o estan caidas. Internet Archive ofrece
 grabaciones de alta calidad sin registro, con licencias public domain o CC.
+Mutopia Project ofrece partituras PDF de dominio publico.
 
 Fuentes verificadas en vivo el 2026-09-05:
 - Internet Archive: Search API + metadata API funcionan, MP3s descargables.
   URL de descarga: https://{server}{dir}/{filename}
-- Mutopia Project: MIDI/LilyPond/PDF (partituras, no audio).
+- Mutopia Project: PDFs descargables sin registro.
+  URL: https://www.mutopiaproject.org/ftp/{path}/{name}-a4.pdf
 
 Uso:
-    python3 descarga_musica.py demo                 # 10 piezas seleccionadas
+    python3 descarga_musica.py demo                 # 10 piezas + PDFs
+    python3 descarga_musica.py demo --sin-partituras  # solo audio
     python3 descarga_musica.py buscar "Bach piano"  # busqueda libre
     python3 descarga_musica.py buscar "Vivaldi" --limite 5
     python3 descarga_musica.py listar-fuentes       # fuentes disponibles
@@ -29,10 +33,11 @@ import urllib.parse
 import urllib.request
 
 __all__ = [
-    "ARCHIVE_SEARCH_URL", "ARCHIVE_METADATA_URL", "DIR_MUSICA",
+    "ARCHIVE_SEARCH_URL", "ARCHIVE_METADATA_URL", "MUTOPIA_FTP_BASE",
+    "DIR_MUSICA",
     "buscar_archive", "obtener_metadata", "archivos_mp3",
     "construir_url_descarga", "descargar_archivo", "descargar_lista",
-    "PIEZAS_DEMO",
+    "descargar_partitura", "PIEZAS_DEMO",
 ]
 
 # ---------------------------------------------------------------------------
@@ -41,6 +46,7 @@ __all__ = [
 
 ARCHIVE_SEARCH_URL = "https://archive.org/advancedsearch.php"
 ARCHIVE_METADATA_URL = "https://archive.org/metadata/{identifier}"
+MUTOPIA_FTP_BASE = "https://www.mutopiaproject.org/ftp"
 
 DIR_MUSICA = "musica"
 RATE_LIMIT_SEG = 1.0          # 1 request/segundo (cortesia)
@@ -48,12 +54,14 @@ MAX_TAMANIO_MB = 500           # limite de seguridad por archivo
 
 # Piezas demo seleccionadas: grabaciones reales verificadas en Archive.org
 # (identifiers obtenidos de la Search API, metadata confirmada).
+# Partituras PDF verificadas en Mutopia Project (2026-09-05).
 PIEZAS_DEMO = [
     {
         "titulo": "Goldberg Variations BWV 988 (completas)",
         "artista": "Wanda Landowska, clave",
         "identifier": "BachGoldbergVariations",
         "licencia": "public domain",
+        "partitura": "BachJS/BWV988/bwv-988-aria/bwv-988-aria-a4.pdf",
     },
     {
         "titulo": "Violin Partita No. 3 BWV 1006 - Preludio",
@@ -87,6 +95,7 @@ PIEZAS_DEMO = [
         "artista": "Ludwig van Beethoven",
         "identifier": "MoonlightSonata_755",
         "licencia": "public domain",
+        "partitura": "BeethovenLv/O27/moonlight/moonlight-a4.pdf",
     },
     {
         "titulo": "Las Cuatro Estaciones - Primavera RV 269",
@@ -111,6 +120,7 @@ PIEZAS_DEMO = [
         "artista": "Claude Debussy",
         "identifier": "debussy-clair-de-lunemp-3j.cc",
         "licencia": "public domain",
+        "partitura": "DebussyC/L75/debussy_Ste_Bergamesq_Clair/debussy_Ste_Bergamesq_Clair-a4.pdf",
     },
 ]
 
@@ -250,12 +260,29 @@ def descargar_archivo(url, destino, tamanio_max_mb=MAX_TAMANIO_MB):
         return False
 
 
-def descargar_lista(items, directorio=DIR_MUSICA, dry_run=False):
-    """Descarga una lista de items de Archive.org.
+def descargar_partitura(partitura_path, destino):
+    """Descarga una partitura PDF desde Mutopia Project.
+
+    partitura_path: ruta relativa dentro del FTP de Mutopia
+                    (ej: "BeethovenLv/O27/moonlight/moonlight-a4.pdf").
+    Retorna True si la descarga fue exitosa.
+    """
+    if not partitura_path:
+        return False
+    url = f"{MUTOPIA_FTP_BASE}/{partitura_path}"
+    print(f"  Partitura: {url}")
+    return descargar_archivo(url, destino)
+
+
+def descargar_lista(items, directorio=DIR_MUSICA, dry_run=False,
+                    con_partituras=True):
+    """Descarga una lista de items de Archive.org + PDFs de Mutopia.
 
     Cada item es un dict con keys最少: identifier, titulo.
     Si el item tiene 'archivo_idx', usa ese indice para selects un MP3
     especifico del item (para items con multiples pistas).
+    Si el item tiene 'partitura' y con_partituras=True, descarga el PDF
+    desde Mutopia Project.
     Retorna (exitosas, fallidas).
     """
     exitosas = 0
@@ -264,6 +291,7 @@ def descargar_lista(items, directorio=DIR_MUSICA, dry_run=False):
         identifier = item["identifier"]
         titulo = item.get("titulo", identifier)
         archivo_idx = item.get("archivo_idx", 0)
+        partitura = item.get("partitura")
         print(f"\n[{i}/{len(items)}] {titulo}")
         print(f"  Identifier: {identifier}")
 
@@ -287,6 +315,9 @@ def descargar_lista(items, directorio=DIR_MUSICA, dry_run=False):
 
         if dry_run:
             print("  [DRY-RUN] No se descarga")
+            if partitura and con_partituras:
+                pdf_url = f"{MUTOPIA_FTP_BASE}/{partitura}"
+                print(f"  Partitura: {pdf_url}")
             exitosas += 1
             continue
 
@@ -296,24 +327,39 @@ def descargar_lista(items, directorio=DIR_MUSICA, dry_run=False):
         extension = os.path.splitext(nombre)[1] or ".mp3"
         destino = os.path.join(directorio, f"{i:02d}_{nombre_limpio}{extension}")
 
-        # Descargar
-        if descargar_archivo(url, destino):
+        # Descargar audio
+        ok = descargar_archivo(url, destino)
+        if ok:
             print(f"  OK -> {destino}")
             exitosas += 1
         else:
             fallidas += 1
+            continue
+
+        # Descargar partitura PDF si esta disponible
+        if partitura and con_partituras:
+            nombre_pdf = re.sub(r'[^\w\s\-\.]', '_', titulo)
+            nombre_pdf = re.sub(r'\s+', '_', nombre_pdf).strip('_')
+            destino_pdf = os.path.join(directorio,
+                                       f"{i:02d}_{nombre_pdf}.pdf")
+            if descargar_partitura(partitura, destino_pdf):
+                print(f"  PDF -> {destino_pdf}")
+            # La partitura es opcional: no cuenta como fallo
 
     return exitosas, fallidas
 
 
-def demo(directorio=DIR_MUSICA, dry_run=False):
-    """Descarga las 10 piezas demo preseleccionadas."""
+def demo(directorio=DIR_MUSICA, dry_run=False, con_partituras=True):
+    """Descarga las 10 piezas demo preseleccionadas + PDFs."""
     print("=" * 60)
     print("DESCARGANDO 10 PIEZAS CLASICAS GRATUITAS (DEMO)")
+    if con_partituras:
+        print("+ PARTITURAS PDF (Mutopia Project)")
     print("=" * 60)
     print(f"Destino: {directorio}/")
     print()
-    exitosas, fallidas = descargar_lista(PIEZAS_DEMO, directorio, dry_run)
+    exitosas, fallidas = descargar_lista(PIEZAS_DEMO, directorio, dry_run,
+                                        con_partituras)
     print()
     print("=" * 60)
     print(f"RESUMEN: {exitosas}/{len(PIEZAS_DEMO)} descargadas exitosamente")
@@ -328,26 +374,29 @@ def listar_fuentes():
     print("FUENTES DE MUSICA GRATUITA VERIFICADAS")
     print("=" * 60)
     print()
-    print("1. Internet Archive (archive.org)")
+    print("1. Internet Archive (archive.org) — AUDIO")
     print("   - Busqueda: API publica sin autenticacion")
     print("   - Formato: MP3, FLAC, Ogg Vorbis")
     print("   - Licencia: public domain, CC (varia por item)")
     print("   - Limite: sin limite de descargas")
     print("   - Estado: VERIFICADO OK (2026-09-05)")
     print()
-    print("2. Mutopia Project (mutopiaproject.org)")
-    print("   - Formato: LilyPond, MIDI, PDF (partituras)")
+    print("2. Mutopia Project (mutopiaproject.org) — PARTITURAS PDF")
+    print("   - Formato: PDF (A4/Letter), LilyPond, MIDI")
     print("   - Licencia: Public Domain o CC")
-    print("   - Nota: NO tiene audio, solo partituras")
+    print("   - Descarga directa: sin registro")
+    print("   - URL: {base}/{path}/{name}-a4.pdf".format(
+        base=MUTOPIA_FTP_BASE, path="...", name="..."))
     print("   - Estado: VERIFICADO OK (2026-09-05)")
     print()
     print("Fuentes NO disponibles:")
     print("  - Musopen: 403 (requiere autenticacion)")
     print("  - Musiqpub: caido (connection refused)")
-    print("  - IMSLP: audio varia por pagina (no API programatica)")
+    print("  - IMSLP: sin API programatica para PDFs")
     print()
     print("Uso recomendado:")
-    print("  python3 descarga_musica.py demo    # 10 piezas seleccionadas")
+    print("  python3 descarga_musica.py demo              # audio + PDFs")
+    print("  python3 descarga_musica.py demo --sin-partituras  # solo audio")
     print("  python3 descarga_musica.py buscar \"Vivaldi\" --limite 5")
 
 
