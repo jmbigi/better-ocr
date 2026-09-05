@@ -576,10 +576,24 @@
 
 **Lección:** el OCR no distingue "imagen vacía" de "modelo que no leyó": la estadística de píxeles es el discriminador barato y determinista. En auditorías, la captura es evidencia secundaria; el error de red del navegador y la verificación HTTP del destino son la primaria.
 
-## 39. No inventar identifiers de Archive.org (P0.2, 2026-09-05)
+## 43. No inventar identifiers de Archive.org (P0.2, 2026-09-05)
 
 **Fallo (1 vez):** al crear `descarga_musica.py`, se escribieron 4 identifiers de demo inventados (`BeethovenPianoSonata14`, `PachelbelCanonInD`, `SatieGymnopedie1`, `DebussyClairDeLune`) que no existían en Internet Archive. El dry-run reveló 4/10 piezas con `[SKIP] No se pudo obtener metadata`.
 
 **Solución:** se buscaron los identifiers reales via la Search API de Archive.org (`advancedsearch.php?q=title:"..." mediatype:audio`) y se verificaron con la metadata API (`/metadata/{identifier}`) confirmando que cada item tiene archivos MP3 descargables. Identifiers correctos: `MoonlightSonata_755`, `jamendo-617470`, `erik-satie-gymnopedie-no.-1_202211`, `debussy-clair-de-lunemp-3j.cc`.
 
 **Lección:** los identifiers de Archive.org son opacos (nombres de carpeta, no slug legibles). NUNCA se inventan: siempre se buscan con la Search API y se confirman con la metadata API antes de usar (P0.2). La demo dry-run es la herramienta de verificación: si un item da `[SKIP]`, el identifier es incorrecto.
+
+## 44. Partituras PDF desde Mutopia Project (2026-09-05)
+
+**Contexto:** extensión de `descarga_musica.py` para descargar también partituras PDF, solicitada por el programador ("sonidos y pdfs de partituras también").
+
+**Hallazgo 1 — Mutopia Project tiene descarga directa sin registro:** la URL patrón es `https://www.mutopiaproject.org/ftp/{composer_path}/{piece_path}/{piece_name}-a4.pdf` (formato A4). Verificadas en vivo 2026-09-05: Goldberg Aria, Moonlight Sonata, Clair de Lune. Satie Gymnopedie NO está en Mutopia (solo Gnossienne y piezas menores).
+
+**Hallazgo 2 — Musopen/Musiqpub/IMSLP no son alternativas viables para PDFs:** Musopen (403), Musiqpub (caído), IMSLP (sin API programática). Mutopia es la única fuente gratuita verificada con descarga directa.
+
+**Solución:** nueva constante `MUTOPIA_FTP_BASE`, función `descargar_partitura()`, campo `partitura` en `PIEZAS_DEMO` para 3/10 piezas (Goldberg, Moonlight, Clair de Lune), flag `--sin-partituras` en CLI. Las partituras son descargas opcionales: si fallan no cuentan como fallo de la pieza.
+
+**Verificación:** 27/27 tests (8 nuevos para PDFs), `py_compile` OK, `verificar-proyecto.sh` 41/42 (único fallo = working tree dirty).
+
+**Lección:** antes de añadir una fuente de descarga verificar la URL de descarga real (no solo la existencia del sitio). Mutopia expone sus PDFs en URLs predecibles, pero el path exacto varía por compositor/pieza — no se inventan paths, se verifican con requests HEAD o con la propia descarga.
