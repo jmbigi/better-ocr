@@ -575,3 +575,11 @@
 **Verificación:** 12 capturas analizadas con ImageStat (todas mean 255,255,255) + OCR de 7 capturas con contenido (texto correcto) + verificación independiente con `curl` y navegación directa de los destinos.
 
 **Lección:** el OCR no distingue "imagen vacía" de "modelo que no leyó": la estadística de píxeles es el discriminador barato y determinista. En auditorías, la captura es evidencia secundaria; el error de red del navegador y la verificación HTTP del destino son la primaria.
+
+## 39. No inventar identifiers de Archive.org (P0.2, 2026-09-05)
+
+**Fallo (1 vez):** al crear `descarga_musica.py`, se escribieron 4 identifiers de demo inventados (`BeethovenPianoSonata14`, `PachelbelCanonInD`, `SatieGymnopedie1`, `DebussyClairDeLune`) que no existían en Internet Archive. El dry-run reveló 4/10 piezas con `[SKIP] No se pudo obtener metadata`.
+
+**Solución:** se buscaron los identifiers reales via la Search API de Archive.org (`advancedsearch.php?q=title:"..." mediatype:audio`) y se verificaron con la metadata API (`/metadata/{identifier}`) confirmando que cada item tiene archivos MP3 descargables. Identifiers correctos: `MoonlightSonata_755`, `jamendo-617470`, `erik-satie-gymnopedie-no.-1_202211`, `debussy-clair-de-lunemp-3j.cc`.
+
+**Lección:** los identifiers de Archive.org son opacos (nombres de carpeta, no slug legibles). NUNCA se inventan: siempre se buscan con la Search API y se confirman con la metadata API antes de usar (P0.2). La demo dry-run es la herramienta de verificación: si un item da `[SKIP]`, el identifier es incorrecto.
