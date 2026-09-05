@@ -559,3 +559,19 @@
 **Verificación:** tras 3 pasadas de filter-repo, `git log --all -S` = 0 en los 9 valores reales; force-push a GitHub (público) y Codeberg; verificador 41 OK, 0 FALLOS. Backup pre-purga en `/var/tmp/better-ocr-backup-20260816.bundle`. Resta avisar al titular (P0.9) y re-clonar copias locales (hashes reescritos).
 
 **Lección:** la purga del historial es una operación global e irreversible: backup previo obligatorio, planificar TODOS los reemplazos (con y sin guiones) antes de empezar, no dejar cambios sin commitear en el working tree, y verificar con `git log --all -S` + un check automático permanente que escanee el historial completo (verificar-proyecto.sh).
+
+## 42. OCR en capturas de páginas de error: el vacío de PP-OCRv6 NO es un fallo (2026-08-16)
+
+**Contexto:** auditoría de 51 enlaces de un sitio web (Playwright): 12 destinos terminaron en `chrome-error://chromewebdata/` (página de error de Chromium que no llegó a pintarse). Se pasó cada captura por `vision.py --modo texto`: las 12 devolvieron `lineas` vacías, mientras las capturas con contenido real (404 de nginx, páginas normales) devolvían texto correcto con scores altos.
+
+**Hallazgo — OCR vacío + imagen uniforme = "no hay texto", no "OCR falló":** la estadística de píxeles (PIL `ImageStat.Stat().mean` RGB) dio (255, 255, 255) en las 12 capturas: son pantallas 100% blancas, SIN texto que leer. PP-OCRv6 no encontró nada porque no había nada. Conclusión correcta: el enlace falló en red (DNS/TLS/timeout), no en OCR.
+
+**Solución (heurística de verificación):** ante `lineas` vacías en OCR de texto, medir la uniformidad de la imagen (mean RGB + desviación) antes de concluir:
+- Imagen uniforme (blanca/negra) → sin contenido real, el vacío es correcto y la causa está en la red o el render, no en el OCR.
+- Imagen con contenido (varianza alta) y OCR vacío → sospecha real de fallo del modelo, re-verificar (upscale, otra pasada).
+
+**Complemento operativo — no depender solo de la captura:** para diagnosticar enlaces el código net del navegador (evento `requestfailed` de Playwright, `errorText`: `ERR_NAME_NOT_RESOLVED`, `ERR_NETWORK_CHANGED`…) es evidencia más directa que la captura; y cuando la URL real está ofuscada tras un redirect JS, decodificar el parámetro localmente (AES) y verificar el destino con `curl` permite clasificar 404/502/DNS sin navegador.
+
+**Verificación:** 12 capturas analizadas con ImageStat (todas mean 255,255,255) + OCR de 7 capturas con contenido (texto correcto) + verificación independiente con `curl` y navegación directa de los destinos.
+
+**Lección:** el OCR no distingue "imagen vacía" de "modelo que no leyó": la estadística de píxeles es el discriminador barato y determinista. En auditorías, la captura es evidencia secundaria; el error de red del navegador y la verificación HTTP del destino son la primaria.
