@@ -19,25 +19,35 @@ Uso:
     python3 descarga_musica.py demo --sin-partituras  # solo audio
     python3 descarga_musica.py buscar "Bach piano"  # busqueda libre
     python3 descarga_musica.py buscar "Vivaldi" --limite 5
+    python3 descarga_musica.py partituras           # catalogo PDF por estilo
+    python3 descarga_musica.py partituras --estilos Baroque,Classical
+    python3 descarga_musica.py partituras --dry-run # solo listar
     python3 descarga_musica.py listar-fuentes       # fuentes disponibles
 """
 
 import argparse
+import html
+import io
 import json
 import os
 import re
+import shutil
 import sys
 import time
+import unicodedata
 import urllib.error
 import urllib.parse
 import urllib.request
+import zipfile
 
 __all__ = [
     "ARCHIVE_SEARCH_URL", "ARCHIVE_METADATA_URL", "MUTOPIA_FTP_BASE",
-    "DIR_MUSICA",
+    "MUTOPIA_TABLE_URL", "DIR_MUSICA", "ESTILOS_MUTOPIA", "SLUG_ESTILO",
     "buscar_archive", "obtener_metadata", "archivos_mp3",
     "construir_url_descarga", "descargar_archivo", "descargar_lista",
     "descargar_partitura", "PIEZAS_DEMO",
+    "parsear_pagina_mutopia", "buscar_catalogo_mutopia",
+    "descargar_bytes", "descargar_zip_pdfs", "descargar_catalogo_mutopia",
 ]
 
 # ---------------------------------------------------------------------------
@@ -47,6 +57,32 @@ __all__ = [
 ARCHIVE_SEARCH_URL = "https://archive.org/advancedsearch.php"
 ARCHIVE_METADATA_URL = "https://archive.org/metadata/{identifier}"
 MUTOPIA_FTP_BASE = "https://www.mutopiaproject.org/ftp"
+# Listado HTML del catalogo de Mutopia (10 piezas por pagina, paginado con
+# startat=1,11,21...). Verificado en vivo 2026-09-17.
+MUTOPIA_TABLE_URL = "https://www.mutopiaproject.org/cgibin/make-table.cgi"
+
+# Estilos de Mutopia (opciones reales del buscador avanzado, verificadas en
+# vivo 2026-09-17). Gospel existe en el formulario pero no tiene piezas.
+ESTILOS_MUTOPIA = [
+    "Baroque", "Classical", "Romantic", "Modern", "Renaissance", "Folk",
+    "Hymn", "Jazz", "March", "Popular / Dance", "Song", "Technique",
+]
+
+# Nombre de subcarpeta por estilo (minusculas, sin acentos ni espacios).
+SLUG_ESTILO = {
+    "Baroque": "barroco",
+    "Classical": "clasico",
+    "Romantic": "romantico",
+    "Modern": "moderno",
+    "Renaissance": "renacimiento",
+    "Folk": "folk",
+    "Hymn": "himnos",
+    "Jazz": "jazz",
+    "March": "marchas",
+    "Popular / Dance": "popular_danza",
+    "Song": "canciones",
+    "Technique": "tecnica",
+}
 
 DIR_MUSICA = "musica"
 RATE_LIMIT_SEG = 1.0          # 1 request/segundo (cortesia)
@@ -274,6 +310,235 @@ def descargar_partitura(partitura_path, destino):
     return descargar_archivo(url, destino)
 
 
+# ---------------------------------------------------------------------------
+# Catalogo completo de Mutopia por estilo (partituras PDF)
+# ---------------------------------------------------------------------------
+
+_RE_RESULT_TABLE = re.compile(
+    r'<table class="table-bordered result-table">(.*?)</table>', re.S)
+_RE_TITULO_COMPOSITOR = re.compile(
+    r'<tr><td>(.*?)</td>\s*<td>(.*?)</td>', re.S)
+_RE_INSTRUMENTO = re.compile(r'<td>for\s+(.*?)</td>', re.S)
+_RE_ESTILO = re.compile(
+    r'<td>for\s+.*?</td>\s*<td>.*?</td>\s*<td>(.*?)</td>', re.S)
+_RE_PIECE_ID = re.compile(r'piece-info\.cgi\?id=(\d+)')
+_RE_PDF_A4 = re.compile(
+    r'href="(https://www\.mutopiaproject\.org/ftp/[^"]+-a4\.pdf)"')
+_RE_ZIP_A4 = re.compile(
+    r'href="(https://www\.mutopiaproject\.org/ftp/[^"]+-a4-pdfs\.zip)"')
+
+
+def _limpiar_texto(fragmento):
+    """Quita tags HTML, desescapa entidades y normaliza espacios."""
+    sin_tags = re.sub(r'<[^>]+>', '', fragmento)
+    return re.sub(r'\s+', ' ', html.unescape(sin_tags)).strip()
+
+
+def _nombre_archivo(texto, maximo=80):
+    """Convierte un texto en nombre de archivo seguro (sin acentos).
+
+    Mantiene letras, digitos, espacios (-> guion bajo) y guiones.
+    """
+    normalizado = unicodedata.normalize("NFKD", texto)
+    sin_acentos = "".join(c for c in normalizado
+                          if not unicodedata.combining(c))
+    limpio = re.sub(r'[^\w\s\-]', '', sin_acentos)
+    return re.sub(r'\s+', '_', limpio).strip('_')[:maximo]
+
+
+def parsear_pagina_mutopia(html_texto):
+    """Parsea una pagina de make-table.cgi del catalogo de Mutopia.
+
+    Retorna una lista de dicts con keys: id, titulo, compositor,
+    instrumento, estilo, pdf (URL A4) y zip (URL del zip A4 con PDFs).
+    pdf y zip son mutuamente excluyentes en la practica; al menos uno
+    puede ser None. Verificada contra HTML real el 2026-09-17.
+    """
+    piezas = []
+    for bloque in _RE_RESULT_TABLE.findall(html_texto):
+        m_tc = _RE_TITULO_COMPOSITOR.search(bloque)
+        if not m_tc:
+            continue
+        titulo = _limpiar_texto(m_tc.group(1))
+        # El compositor puede venir "by X" o sin prefijo (p. ej. "Anonymous").
+        compositor = re.sub(r'^by\s+', '',
+                            _limpiar_texto(m_tc.group(2)))
+        m_instr = _RE_INSTRUMENTO.search(bloque)
+        m_estilo = _RE_ESTILO.search(bloque)
+        m_id = _RE_PIECE_ID.search(bloque)
+        m_pdf = _RE_PDF_A4.search(bloque)
+        m_zip = _RE_ZIP_A4.search(bloque)
+        if not m_id or not titulo:
+            continue
+        piezas.append({
+            "id": int(m_id.group(1)),
+            "titulo": titulo,
+            "compositor": compositor,
+            "instrumento": _limpiar_texto(m_instr.group(1)) if m_instr else "",
+            "estilo": _limpiar_texto(m_estilo.group(1)) if m_estilo else "",
+            "pdf": m_pdf.group(1) if m_pdf else None,
+            "zip": m_zip.group(1) if m_zip else None,
+        })
+    return piezas
+
+
+def _fetch_tabla_mutopia(estilo, startat):
+    """Descarga una pagina del listado de Mutopia para un estilo.
+
+    Retorna el HTML como texto, o cadena vacia si la peticion falla
+    (el error se reporta en stderr; nunca se inventa contenido).
+    """
+    params = {
+        "startat": str(startat), "searchingfor": "", "Composer": "",
+        "Instrument": "", "Style": estilo, "collection": "", "id": "",
+        "solo": "", "recent": "", "timelength": "", "timeunit": "",
+        "lilyversion": "", "preview": "",
+    }
+    url = f"{MUTOPIA_TABLE_URL}?{urllib.parse.urlencode(params)}"
+    try:
+        req = urllib.request.Request(url, headers={"User-Agent": "better-ocr/1.0"})
+        with urllib.request.urlopen(req, timeout=30) as resp:
+            return resp.read().decode("utf-8", "replace")
+    except (urllib.error.URLError, OSError) as e:
+        print(f"[ERROR] Catalogo Mutopia fallo ({estilo}, startat={startat}): {e}",
+              file=sys.stderr)
+        return ""
+
+
+def buscar_catalogo_mutopia(estilo, max_piezas=None, pausa=RATE_LIMIT_SEG):
+    """Recorre las paginas del catalogo de Mutopia para un estilo.
+
+    Retorna la lista completa de piezas (dicts de parsear_pagina_mutopia).
+    Si una pagina falla, se detiene y devuelve lo recolectado (reportado).
+    """
+    piezas = []
+    startat = 1
+    while True:
+        pagina = parsear_pagina_mutopia(_fetch_tabla_mutopia(estilo, startat))
+        if not pagina:
+            break
+        piezas.extend(pagina)
+        if max_piezas is not None and len(piezas) >= max_piezas:
+            return piezas[:max_piezas]
+        if len(pagina) < 10:      # ultima pagina
+            break
+        startat += 10
+        time.sleep(pausa)
+    return piezas
+
+
+def descargar_bytes(url, tamanio_max_mb=MAX_TAMANIO_MB):
+    """Descarga una URL a memoria (para zips de partituras).
+
+    Verifica Content-Length y el tamano real antes de aceptar.
+    Retorna los bytes, o None si falla o supera el limite.
+    """
+    if not url:
+        return None
+    try:
+        req = urllib.request.Request(url, headers={"User-Agent": "better-ocr/1.0"})
+        with urllib.request.urlopen(req, timeout=60) as resp:
+            total = resp.headers.get("Content-Length")
+            if total and int(total) / (1024 * 1024) > tamanio_max_mb:
+                print(f"  [SKIP] Zip demasiado grande: "
+                      f"{int(total) / (1024 * 1024):.1f} MB > {tamanio_max_mb} MB",
+                      file=sys.stderr)
+                return None
+            datos = resp.read()
+            if len(datos) / (1024 * 1024) > tamanio_max_mb:
+                print(f"  [SKIP] Zip demasiado grande tras descargar",
+                      file=sys.stderr)
+                return None
+            return datos
+    except (urllib.error.URLError, OSError) as e:
+        print(f"  [ERROR] Descarga fallida: {e}", file=sys.stderr)
+        return None
+
+
+def descargar_zip_pdfs(url, destino_dir):
+    """Descarga un zip A4 de Mutopia y extrae sus PDFs en destino_dir.
+
+    Cada PDF se guarda por su nombre base (anti path traversal).
+    Retorna True si se extrajo al menos un PDF.
+    """
+    datos = descargar_bytes(url)
+    if datos is None:
+        return False
+    try:
+        with zipfile.ZipFile(io.BytesIO(datos)) as z:
+            pdfs = [n for n in z.namelist() if n.lower().endswith(".pdf")]
+            if not pdfs:
+                print("  [SKIP] El zip no contiene PDFs", file=sys.stderr)
+                return False
+            os.makedirs(destino_dir, exist_ok=True)
+            for nombre in pdfs:
+                base = os.path.basename(nombre)
+                if not base:
+                    continue
+                with z.open(nombre) as src, \
+                        open(os.path.join(destino_dir, base), "wb") as dst:
+                    shutil.copyfileobj(src, dst)
+            return True
+    except (zipfile.BadZipFile, OSError) as e:
+        print(f"  [ERROR] Zip invalido: {e}", file=sys.stderr)
+        return False
+
+
+def descargar_catalogo_mutopia(directorio=os.path.join(DIR_MUSICA, "partituras"),
+                               estilos=None, dry_run=False,
+                               pausa=RATE_LIMIT_SEG, max_por_estilo=None):
+    """Descarga el catalogo de Mutopia en subcarpetas por estilo.
+
+    Cada estilo se guarda en directorio/<slug>/. Las piezas con PDF unico
+    van como archivo; las multi-parte (zip) se extraen en una subcarpeta.
+    Retorna (descargadas, fallidas, omitidas).
+    """
+    if estilos is None:
+        estilos = ESTILOS_MUTOPIA
+    descargadas = 0
+    fallidas = 0
+    omitidas = 0
+    for estilo in estilos:
+        slug = SLUG_ESTILO.get(estilo, _nombre_archivo(estilo).lower())
+        destino_estilo = os.path.join(directorio, slug)
+        print(f"\n{'=' * 60}\nESTILO: {estilo} -> {destino_estilo}\n{'=' * 60}")
+        piezas = buscar_catalogo_mutopia(estilo, max_por_estilo, pausa)
+        print(f"Piezas en el catalogo: {len(piezas)}")
+        for i, p in enumerate(piezas, 1):
+            base = f"{p['id']:04d}_{_nombre_archivo(p['titulo'])}"
+            comp = _nombre_archivo(p["compositor"])
+            etiqueta = f"{base}_{comp}" if comp else base
+            if p["pdf"]:
+                destino = os.path.join(destino_estilo, f"{etiqueta}.pdf")
+                if dry_run:
+                    print(f"  [{i}/{len(piezas)}] {p['titulo']} -> {destino}")
+                    descargadas += 1
+                    continue
+                print(f"  [{i}/{len(piezas)}] {p['titulo']}")
+                if descargar_archivo(p["pdf"], destino):
+                    descargadas += 1
+                else:
+                    fallidas += 1
+            elif p["zip"]:
+                destino = os.path.join(destino_estilo, etiqueta)
+                if dry_run:
+                    print(f"  [{i}/{len(piezas)}] {p['titulo']} (zip) -> {destino}/")
+                    descargadas += 1
+                    continue
+                print(f"  [{i}/{len(piezas)}] {p['titulo']} (zip)")
+                if descargar_zip_pdfs(p["zip"], destino):
+                    descargadas += 1
+                else:
+                    fallidas += 1
+            else:
+                print(f"  [{i}/{len(piezas)}] [SKIP] sin PDF: {p['titulo']}",
+                      file=sys.stderr)
+                omitidas += 1
+            if not dry_run:
+                time.sleep(pausa)
+    return descargadas, fallidas, omitidas
+
+
 def descargar_lista(items, directorio=DIR_MUSICA, dry_run=False,
                     con_partituras=True):
     """Descarga una lista de items de Archive.org + PDFs de Mutopia.
@@ -416,6 +681,9 @@ Ejemplos:
   python3 descarga_musica.py demo --sin-partituras  # solo audio
   python3 descarga_musica.py buscar "Bach piano"  # busqueda libre
   python3 descarga_musica.py buscar "Vivaldi" --limite 5
+  python3 descarga_musica.py partituras           # catalogo PDF por estilo
+  python3 descarga_musica.py partituras --estilos Baroque --max-por-estilo 5
+  python3 descarga_musica.py partituras --dry-run # solo listar
   python3 descarga_musica.py listar-fuentes       # fuentes disponibles
 """,
     )
@@ -439,6 +707,23 @@ Ejemplos:
                           help="Directorio destino (default: musica/)")
     p_buscar.add_argument("--dry-run", action="store_true",
                           help="Solo muestra URLs, no descarga")
+
+    # partituras
+    p_part = sub.add_parser(
+        "partituras",
+        help="Descarga el catalogo completo de partituras PDF de Mutopia "
+             "en subcarpetas por estilo")
+    p_part.add_argument("--directorio", default=os.path.join(DIR_MUSICA, "partituras"),
+                        help="Directorio destino (default: musica/partituras/)")
+    p_part.add_argument("--estilos", default="todos",
+                        help="Estilos separados por coma o 'todos' "
+                             f"(validos: {', '.join(ESTILOS_MUTOPIA)})")
+    p_part.add_argument("--dry-run", action="store_true",
+                        help="Solo muestra las piezas, no descarga")
+    p_part.add_argument("--pausa", type=float, default=RATE_LIMIT_SEG,
+                        help="Segundos entre peticiones (default: 1.0)")
+    p_part.add_argument("--max-por-estilo", type=int, default=None,
+                        help="Limite de piezas por estilo (default: sin limite)")
 
     # listar-fuentes
     sub.add_parser("listar-fuentes", help="Muestra fuentes disponibles")
@@ -467,6 +752,23 @@ Ejemplos:
         exitosas, fallidas = descargar_lista(items, args.directorio,
                                             args.dry_run)
         print(f"\nRESUMEN: {exitosas}/{len(items)} descargadas")
+    elif args.comando == "partituras":
+        if args.estilos.strip().lower() == "todos":
+            estilos = list(ESTILOS_MUTOPIA)
+        else:
+            estilos = [e.strip() for e in args.estilos.split(",") if e.strip()]
+            invalidos = [e for e in estilos if e not in ESTILOS_MUTOPIA]
+            if invalidos:
+                print(f"Estilos invalidos: {invalidos}\n"
+                      f"Validos: {', '.join(ESTILOS_MUTOPIA)}", file=sys.stderr)
+                sys.exit(1)
+        descargadas, fallidas, omitidas = descargar_catalogo_mutopia(
+            args.directorio, estilos, args.dry_run, args.pausa,
+            args.max_por_estilo)
+        print(f"\n{'=' * 60}")
+        print(f"RESUMEN: {descargadas} descargadas, {fallidas} fallidas, "
+              f"{omitidas} omitidas")
+        print("=" * 60)
     elif args.comando == "listar-fuentes":
         listar_fuentes()
     else:

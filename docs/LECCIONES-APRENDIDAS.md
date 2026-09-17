@@ -597,3 +597,17 @@
 **Verificación:** 27/27 tests (8 nuevos para PDFs), `py_compile` OK, `verificar-proyecto.sh` 41/42 (único fallo = working tree dirty).
 
 **Lección:** antes de añadir una fuente de descarga verificar la URL de descarga real (no solo la existencia del sitio). Mutopia expone sus PDFs en URLs predecibles, pero el path exacto varía por compositor/pieza — no se inventan paths, se verifican con requests HEAD o con la propia descarga.
+
+## 45. Catálogo completo de Mutopia por estilo: parser de HTML y zips multi-parte (2026-09-17)
+
+**Contexto:** el programador pidió "bajar más partituras musicales públicas en PDF y generar subcarpetas por tema, clase o categoría". Se extendió `descarga_musica.py` con el subcomando `partituras`, que recorre el catálogo COMPLETO de Mutopia Project filtrado por estilo y descarga cada pieza en una subcarpeta por estilo.
+
+**Hallazgo 1 — el catálogo completo es accesible y paginado:** `https://www.mutopiaproject.org/cgibin/make-table.cgi` devuelve 10 piezas por página (parámetro `startat=1,11,21...`) y acepta los filtros del buscador avanzado (`Style`, `Instrument`, `Composer`). Conteo verificado en vivo 2026-09-17: **2.111 piezas** en 12 estilos (Baroque 676, Classical 611, Romantic 442, Modern 24, Renaissance 56, Folk 109, Hymn 110, Jazz 23, March 7, Popular / Dance 5, Song 28, Technique 20), **0 sin PDF**. No se inventaron URLs: cada pieza se descubre en el listado.
+
+**Fallo 1 (1 vez) — el parser exigía el prefijo `by ` del compositor y descartaba en silencio:** el primer dry-run de Baroque encontró solo 3/676 piezas. El listado real tiene bloques con compositor `Anonymous` SIN el prefijo `by `; la regex `<td>by\s+` no matcheaba y `parsear_pagina_mutopia` los omitía sin avisar. Fix: aceptar cualquier segunda celda y quitar el prefijo `by ` de forma opcional (`re.sub(r'^by\s+', '', ...)`). Regresión añadida con el bloque REAL de "Ich ruf zu dir, Herr Jesus Christ" (id 578, Anonymous). Tras el fix, el conteo live volvió a 676/2111.
+
+**Hallazgo 2 — las obras multi-parte vienen en zip, no como PDF único:** algunas piezas exponen `-a4-pdfs.zip` (score + partes) en lugar de `-a4.pdf`. Hay que descargar el zip a memoria y extraer sus PDFs por `basename` (anti path traversal). Verificado con "Rialto Ripples" (Gershwin): 4 PDFs (score + guitarra 1/2/3). Las piezas sin PDF ni zip se omiten y se reportan (no cuentan como fallo).
+
+**Verificación:** 54 tests del módulo (27 nuevos) y **453/453** de la suite completa; `py_compile` OK; dry-run live de Jazz (23/23) y descarga real de 2 piezas (una PDF único + una zip con 4 PDFs) validadas con `file` (PDF 1.4). Descarga completa real: **2111/2111 piezas, 0 fallidas**, 0 errores en el log; **3.171 PDFs** (636 MB) en 12 subcarpetas por estilo, con integridad verificada archivo por archivo (0 sin cabecera `%PDF`, 0 vacíos, 0 sin `%%EOF`).
+
+**Lección:** en scraping de HTML, no asumir prefijos ni formatos de campo; validar el parser contra la página COMPLETA (comparar bloques presentes vs parseados), no solo con 1-2 ejemplos. Un parser que descarta bloques en silencio es un fallback silencioso (P1.19): debe reportar los descartes o, mejor, no descartar.

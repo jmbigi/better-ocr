@@ -429,3 +429,20 @@ Detalles verificados:
 - Backup pre-purga: `/var/tmp/better-ocr-backup-20260816.bundle`.
 
 **Lecciones (P1.20, lección 41):** el working tree y los cambios sin commitear se pierden con filter-repo (commitear antes); el archivo de reemplazos debe cubrir formas con y sin guiones; los remotes se re-añaden y se force-pushea a todos; un CUIT real se distingue del placeholder por tener dígitos no triviales.
+
+## 17. Catálogo completo de partituras de Mutopia por estilo (`descarga_musica.py partituras` — 2026-09-17)
+
+**Qué es:** nuevo subcomando `partituras` que recorre el catálogo completo de Mutopia Project (filtrado por estilo) y descarga cada partitura en una subcarpeta por estilo. Los estilos se mapean a slugs: `barroco/`, `clasico/`, `romantico/`, `moderno/`, `renacimiento/`, `folk/`, `himnos/`, `jazz/`, `marchas/`, `popular_danza/`, `canciones/`, `tecnica/`. Las obras multi-parte (`-a4-pdfs.zip`) se extraen en su propia subcarpeta.
+
+**Evidencia (P0.1):**
+- **Conteo live del catálogo (2026-09-17):** 2.111 piezas en 12 estilos (Baroque 676, Classical 611, Romantic 442, Modern 24, Renaissance 56, Folk 109, Hymn 110, Jazz 23, March 7, Popular / Dance 5, Song 28, Technique 20), **0 sin PDF/zip**.
+- **Tests:** 54 del módulo (27 nuevos: parser con bloques HTML reales, paginación, `descargar_bytes`, extracción de zip con anti path traversal, descarga por estilo/dry-run/omisiones/fallos) y **453/453** de la suite completa. `py_compile` OK.
+- **Dry-run live de Jazz:** 23/23 piezas detectadas con nombre de archivo y destino correctos.
+- **Descarga real de prueba (Jazz, 2 piezas):** una PDF único (`Possum And Taters`, PDF 1.4, 4 páginas) y una zip multi-parte (`Rialto Ripples`, 4 PDFs: score + guitarra 1/2/3), verificadas con `file`.
+- **Descarga COMPLETA real (2026-09-17):** `RESUMEN: 2111 descargadas, 0 fallidas, 0 omitidas`, 0 `[ERROR]`/`[SKIP]` en el log. Resultado: **3.171 PDFs** (las obras multi-parte aportan varios archivos por pieza) en 12 subcarpetas por estilo — barroco 1020, clasico 1065, romantico 648, moderno 24, renacimiento 64, folk 109, himnos 110, jazz 26, marchas 52, popular_danza 5, canciones 28, tecnica 20. **636 MB** en total. Integridad verificada archivo por archivo: 0 sin cabecera `%PDF`, 0 vacíos, 0 sin `%%EOF` (ningún truncado).
+- **Bug encontrado y corregido (regresión):** el parser exigía el prefijo `by ` y descartaba los bloques con compositor `Anonymous` (3/676 en Baroque); el test de regresión usa el bloque real de "Ich ruf zu dir, Herr Jesus Christ" (id 578). Ver lección 45.
+
+**Comando:**
+```bash
+python3 descarga_musica.py partituras --directorio <destino> [--estilos ...] [--max-por-estilo N] [--pausa S] [--dry-run]
+```

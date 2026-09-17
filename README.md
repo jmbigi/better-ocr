@@ -37,6 +37,7 @@ Crear un procedimiento documentado, reproducible y validado en ejecución real p
 | `analizar_cuit.py` | **Analizador de CUIT con IA de algoritmo:** reglas deterministas con confianza y explicación — persona física (prefijos 20/23/24/25/26/27) vs jurídica (30/33/34); década estimada de emisión del DNI (nunca la edad, advertencia explícita); tipo de empresa por razón social; ficha de CuitOnline (Empleador Sí/No, impuestos activos → condición Monotributo/Responsable Inscripto, provincia/localidad; el sexo no se extrae, P0.9); titular DNS de dominios candidatos; judiciales y recomendadores (dorks). Resumen VLM opt-in (`--vision docbee|ollama`) que solo redacta lo ya verificado. |
 | `buscador_empresas.py` | **Buscador inteligente por campos:** búsquedas completas por CUIT o nombre (`--lista` para varias) que generan la **TABLA-EMPRESAS-CUIT-TIPO.md** en el formato estándar del dominio (Empresa | CUIT | Razón social | Tipo | Condición | Empleadora | Fuente) con la regla **TODO REAL** ("No consta — pedir por escrito" para lo no verificado; "Empleadora" solo marca lo confirmado en CuitOnline; los titulares personas físicas no se publican, P0.9). |
 | `auditoria_graficos.py` | **Auditoría visual y descripción de gráficos/charts:** dos capas. (1) Determinista PIL+numpy sin modelos: superposiciones de etiquetas, problemas de leyenda (ausente/cortada/sobre datos), zoom y recortes (tinta en bordes), nitidez, contraste, ruido, texto pequeño, resolución, tipo de gráfico (barras/pastel/línea/scatter) y series por colores. **Layouts NxN (subplots):** detecta el grid por gutters, analiza cada panel, alinea ejes X, evalúa gutters uniformes, tamaños, paneles vacíos y título general. Genera **sugerencias** accionables (disposición, alineación, legibilidad, UX). (2) Descripción VLM opt-in (`--vision docbee|ollama`) que interpreta variables/tendencias con rúbrica de problemas. `chart_server.py` expone `POST /auditoria`. Demo: `python3 auditoria_graficos.py --demo`. |
+| `descarga_musica.py` | **Descarga de música y partituras gratuitas:** audio clásico desde Internet Archive (`demo`, `buscar "query"`) y partituras PDF desde Mutopia Project. Subcomando **`partituras`**: recorre el catálogo completo de Mutopia (filtrado por estilo) y descarga cada pieza en una subcarpeta por estilo (`barroco/`, `clasico/`, `romantico/`, `moderno/`, `renacimiento/`, `folk/`, `himnos/`, `jazz/`, `marchas/`, `popular_danza/`, `canciones/`, `tecnica/`); las obras multi-parte vienen en zip y se extraen en su propia subcarpeta. Opciones: `--estilos`, `--max-por-estilo`, `--pausa`, `--dry-run`. Fuentes verificadas en vivo 2026-09-17. Solo stdlib. |
 | `chart_server.py` | Daemon HTTP persistente: POST `/chart` (→ `markdown` + `csv`) y POST `/vision` (multi-modo), GET `/health`. Carga el modelo una sola vez y **se cierra solo tras 1 hora sin peticiones de inferencia** (no queda procesos en memoria). |
 | `requirements.txt` | Dependencias del proyecto (paddlepaddle 3.3.1, paddleocr[doc-parser] 3.7.0, pandas). |
 | `tests/test_extraccion.py` | Pruebas unitarias (stdlib + pandas, sin paddleocr): filtrado de separadores, conversión a DataFrame, acceso a la API y servidor HTTP con modelo simulado. |
@@ -149,6 +150,14 @@ python3 auditoria_graficos.py grafico.png --salida txt
 python3 auditoria_graficos.py subplots.png --salida md --salida-archivo informe.md
 python3 auditoria_graficos.py grafico.png --vision docbee   # interpretacion IA
 python3 auditoria_graficos.py --demo                        # demo con fallos plantados
+
+# 3q. Musica y partituras gratuitas (Internet Archive + Mutopia Project)
+python3 descarga_musica.py demo                    # 10 piezas de audio + PDFs
+python3 descarga_musica.py buscar "Bach piano" --limite 5
+python3 descarga_musica.py partituras              # catalogo PDF por estilo
+python3 descarga_musica.py partituras --estilos Baroque,Classical
+python3 descarga_musica.py partituras --dry-run    # listar sin descargar
+python3 descarga_musica.py listar-fuentes
 ```
 
 ## Perfiles por máquina (visión)
