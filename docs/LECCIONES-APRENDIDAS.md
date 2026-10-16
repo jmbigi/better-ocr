@@ -611,3 +611,19 @@
 **Verificación:** 54 tests del módulo (27 nuevos) y **453/453** de la suite completa; `py_compile` OK; dry-run live de Jazz (23/23) y descarga real de 2 piezas (una PDF único + una zip con 4 PDFs) validadas con `file` (PDF 1.4). Descarga completa real: **2111/2111 piezas, 0 fallidas**, 0 errores en el log; **3.171 PDFs** (636 MB) en 12 subcarpetas por estilo, con integridad verificada archivo por archivo (0 sin cabecera `%PDF`, 0 vacíos, 0 sin `%%EOF`).
 
 **Lección:** en scraping de HTML, no asumir prefijos ni formatos de campo; validar el parser contra la página COMPLETA (comparar bloques presentes vs parseados), no solo con 1-2 ejemplos. Un parser que descarta bloques en silencio es un fallback silencioso (P1.19): debe reportar los descartes o, mejor, no descartar.
+
+## 46. Búsqueda académica (arXiv + Crossref): dos APIs sin navegador ni key (2026-10-16)
+
+**Contexto:** el programador pidió ampliar las búsquedas del proyecto (y poder usarlas desde el proyecto thinker). No existía búsqueda de literatura científica: se añadió `academico.py` como COMPLEMENTO de `buscador.py` (multi-motor con Playwright), reutilizando su formato de resultado para no duplicar deduplicación ni ranking.
+
+**Hallazgo 1 — arXiv responde 301 en `http://`:** la API Atom vive en `export.arxiv.org/api/query`; con `curl http://...` la respuesta es 301 y 0 bytes, así que un parseo ingenuo devuelve «0 resultados» sin error. Se usa `https://` directamente. Verificado en vivo 2026-10-16.
+
+**Hallazgo 2 — en Crossref el estado va en la RAÍZ, no dentro de `message`:** la forma es `{"status":"ok","message":{"items":[...]}}`. Un parser que lea `message.status` falla con KeyError aunque la respuesta sea correcta (error real de la primera versión del parser).
+
+**Hallazgo 3 — el `abstract` de Crossref viene en JATS:** `<jats:p>…<jats:italic>…</jats:italic></jats:p>`; hay que quitar etiquetas y colapsar espacios (también en arXiv, cuyo XML trae saltos y sangría dentro de `summary`).
+
+**Solución:** `academico.py` (solo stdlib: urllib + ElementTree) con `parsear_arxiv`/`parsear_crossref` puros y testeables, `buscar_arxiv`/`buscar_crossref`/`buscar_academico` y CLI `--fuente/--max/--json`. Los resultados usan el formato de `buscador.py` (`{motor, posicion, titulo, url, snippet, anio, doi}`) y se probaron contra `buscador.deduplicar()`. Los errores de red o de formato se ELEVAN con contexto (P1.19): nunca lista vacía silenciosa.
+
+**Verificación:** 20 tests offline con respuestas de estructura real (Atom recortado y JSON de Crossref) + ejecución real 2026-10-16: `python3 academico.py "chart data extraction" --max 2` devolvió 2 papers de arXiv (Chart-RCNN 2022, ChartZero 2026) y 2 de Crossref con DOI; `py_compile` OK; suite completa 475 tests con 10 errores PRE-EXISTENTES de entorno (Playwright sin navegador instalado en `test_captcha_web_integracion`: el fallo está en `pw.chromium.launch`, ajeno a este cambio).
+
+**Lección:** al integrar una API nueva, verificar en vivo la forma EXACTA de la respuesta (redirecciones http→https, dónde vive el campo de estado, marcado incrustado) antes de escribir el parser; y reutilizar el formato de resultado del proyecto para que la deduplicación y el ranking existentes funcionen sin adaptadores.
