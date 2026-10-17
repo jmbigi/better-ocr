@@ -12,7 +12,7 @@ import unittest
 from unittest import mock
 
 from openpyxl import Workbook
-from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
+from openpyxl.styles import Alignment, Border, Font, Side
 
 from revision import (CHECKS, CHECKS_DOCX, CHECKS_PDF, REGLAS_DEFAULT,
                       cargar_reglas, comparar_planillas, rango_datos,

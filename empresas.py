@@ -140,7 +140,7 @@ def consultar_cdx(dominio: str, recurso: bool = False,
     filas = {}
     for v in variantes:
         url = (f"{_CDX_BASE}?url={urllib.parse.quote(v)}"
-               + (f"/*" if recurso else "")
+               + ("/*" if recurso else "")
                + f"&output=json&fl={_CDX_FL}&filter=statuscode:200"
                  "&collapse=urlkey")
         try:
@@ -517,8 +517,7 @@ def buscar_empresa(nombre: str, sitio: str = "", motores: list = None,
     con secciones: variantes, cuitonline, dateas, rns, sitio_oficial, rdap,
     web_general, juicios, correos_web, recomendadores, sintesis. Cada paso
     es independiente."""
-    from buscador import (buscar_en_web, buscar_recetas,
-                          extraer_resultados_cuitonline, detectar_bloqueo)
+    from buscador import (buscar_en_web, buscar_recetas)
 
     if motores is None:
         motores = ["bing"]

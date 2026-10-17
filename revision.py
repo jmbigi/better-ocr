@@ -1178,7 +1178,6 @@ def revisar_ods(ruta: str, reglas: dict | None = None,
     hojas y dimensiones entre el ODS original (odfpy/pandas) y el xlsx
     convertido: si difieren, la revision se marca como no fiable.
     """
-    import pandas as pd
 
     dir_tmp = tempfile.mkdtemp(prefix="revision_ods_")
     try:

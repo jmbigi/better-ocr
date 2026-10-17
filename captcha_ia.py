@@ -93,10 +93,7 @@ PLURALES = {
     "stairs": "stairs",
     "taxi": "taxi",
     "taxis": "taxi",
-    "fire hydrants": "fire hydrant",
-    "hydrants": "fire hydrant",
     "people": "person",
-    "persons": "person",
     "persons": "person",
 }
 

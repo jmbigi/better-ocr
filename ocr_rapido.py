@@ -19,7 +19,7 @@ from dataclasses import dataclass, field
 
 import pandas as pd
 
-from extractor_final import es_fila_separadora, markdown_a_df
+from extractor_final import markdown_a_df
 
 FRACCION_VENTANA = 0.5         # ventana de emparejado = 0.5 × espaciado entre años
 RE_ANIO = re.compile(r"\d{4}")

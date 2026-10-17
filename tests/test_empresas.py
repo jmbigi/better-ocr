@@ -7,8 +7,7 @@ Fixtures de CuitOnline derivados de HTML REAL capturado el 2026-08-12
 import json
 import unittest
 
-from empresas import (_capturas_html, _parsear_cdx, consultar_cdx,
-                      dominios_candidatos, extraer_cuits_de_html,
+from empresas import (_capturas_html, _parsear_cdx, dominios_candidatos, extraer_cuits_de_html,
                       extraer_emails_de_html, extraer_razon_social_de_html,
                       extraer_redes_de_html, extraer_whatsapp_de_html,
                       limpiar_sufijo_legal, parsear_rdap,

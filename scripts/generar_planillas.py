@@ -20,11 +20,9 @@ Uso:
 
 import argparse
 import os
-import sys
 
 from openpyxl import Workbook
 from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
-from openpyxl.utils import get_column_letter
 
 
 def _estilo_cabecera(hoja, ncols, fila=1):

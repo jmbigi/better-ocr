@@ -27,10 +27,9 @@ import argparse
 import json
 import os
 import sys
-from collections import deque
 
 import numpy as np
-from PIL import Image, ImageDraw, ImageFilter, ImageFont
+from PIL import Image, ImageDraw, ImageFont
 
 
 def _fuente_demo(tamano: int = 16):
@@ -1680,14 +1679,20 @@ PROMPT_VISION = (
 
 
 def _cargar_motores():
-    """Import perezoso de los motores VLM validados (scripts/bateria_360.py)."""
+    """Import perezoso de los motores VLM validados (scripts/bateria_360.py).
+
+    Devuelve `(run_docbee, run_ollama, error)`: si el import falla, los motores
+    van a None y `error` explica el motivo. (Antes devolvía una 2-tupla y el
+    llamador confundía `run_ollama` con el mensaje de error, además de dejar
+    `run_ollama` sin definir → NameError en la ruta de Ollama.)
+    """
     sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)),
                                     "scripts"))
     try:
         from bateria_360 import run_docbee, run_ollama
-        return run_docbee, run_ollama
+        return run_docbee, run_ollama, ""
     except Exception as exc:  # noqa: BLE001 - el error se reporta al llamador
-        return None, f"scripts/bateria_360.py no importable: {exc}"
+        return None, None, f"scripts/bateria_360.py no importable: {exc}"
 
 
 def _parsear_rubrica_vlm(texto: str) -> dict:
@@ -1724,7 +1729,7 @@ def vision_ia(imagen, motor: str = "docbee", device: str = "gpu",
 
     Devuelve {"ok": bool, "texto": ..., "rubrica": {...} | None, "error": ...}.
     """
-    run_docbee, error = _cargar_motores()
+    run_docbee, run_ollama, error = _cargar_motores()
     if run_docbee is None:
         return {"ok": False, "texto": "", "rubrica": None, "error": error}
     import tempfile
@@ -1753,8 +1758,9 @@ def vision_ia(imagen, motor: str = "docbee", device: str = "gpu",
         if not isinstance(imagen, str):
             try:
                 shutil.rmtree(os.path.dirname(png))
-            except OSError:
-                pass
+            except OSError as exc:
+                print(f"[aviso] no se pudo borrar el temporal {png}: {exc}",
+                      file=sys.stderr)
 
 
 def auditar(imagen, vision: str | None = None, device: str = "gpu",

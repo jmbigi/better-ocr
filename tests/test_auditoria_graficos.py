@@ -6,7 +6,6 @@ Ejecutar: python3 -m unittest discover -s tests -v
 """
 
 import os
-import sys
 import tempfile
 import unittest
 from unittest import mock
@@ -15,16 +14,11 @@ import numpy as np
 from PIL import Image, ImageDraw, ImageFilter
 
 from auditoria_graficos import (clasificar_tipo, describir_determinista,
-                                check_contraste, check_leyenda,
-                                check_nitidez, check_resolucion,
-                                check_superposiciones, check_zoom_cortes,
-                                check_texto_pequeno, check_ruido,
                                 check_contraste_wcag, check_daltonismo,
                                 check_pie_slices, check_series_limit,
                                 _colores_series, _componentes, _ruido,
                                 _maxima_densidad, _tinta, auditar,
-                                vision_ia, _parsear_rubrica_vlm,
-                                describir_leyenda)
+                                vision_ia, _parsear_rubrica_vlm)
 
 
 def _imagen_con(dibujar, w=900, h=600):
@@ -471,7 +465,7 @@ class TestVLM(unittest.TestCase):
             ruta = os.path.join(d, "g.png")
             img.save(ruta)
             with mock.patch("auditoria_graficos._cargar_motores",
-                            return_value=(None, "motor no disponible")):
+                            return_value=(None, None, "motor no disponible")):
                 res = vision_ia(ruta, motor="docbee", timeout_s=1)
             self.assertFalse(res["ok"])
             self.assertIn("error", res)

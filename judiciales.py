@@ -37,7 +37,6 @@ import os
 import re
 import time
 import unicodedata
-import urllib.parse
 
 from empresas import extraer_cuits_de_html, limpiar_sufijo_legal
 

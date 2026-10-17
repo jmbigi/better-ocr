@@ -70,6 +70,12 @@ check "sintaxis: buscador_empresas.py" python3 -m py_compile buscador_empresas.p
 check "sintaxis: rns.py" python3 -m py_compile rns.py
 check "sintaxis: auditoria_graficos.py" python3 -m py_compile auditoria_graficos.py
 check "sintaxis: academico.py" python3 -m py_compile academico.py
+
+if command -v ruff >/dev/null 2>&1; then
+    check "lint: ruff sin avisos" ruff check .
+else
+    echo "  [SKIP] ruff no instalado (lint omitido; instalar para verificar estilo)"
+fi
 check "tests unitarios (stdlib + pandas)" python3 -m unittest discover -s tests -q
 
 echo "== 3. Config =="

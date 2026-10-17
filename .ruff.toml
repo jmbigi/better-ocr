@@ -1,0 +1,13 @@
+# Configuración de lint del proyecto (ruff).
+#
+# Objetivo: `ruff check .` en 0 avisos. Se usan las reglas por defecto
+# (E4, E7, E9, F) menos las dos excepciones documentadas abajo, que son de
+# estilo ya establecido en este código y no afectan a la corrección.
+target-version = "py311"
+line-length = 100
+
+[lint]
+ignore = [
+    "E741",  # nombres ambiguos (`l` como variable): estilo ya extendido en el código
+    "E702",  # varias sentencias en una línea separadas por `;`: idem
+]

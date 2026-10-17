@@ -46,6 +46,7 @@ import argparse
 import json
 import os
 import re
+import sys
 import time
 import urllib.parse
 
@@ -403,8 +404,9 @@ def buscar_ficha_cuitonline(cuit: str, headed: bool = False,
                     with open(os.path.join(salida_dir, "ficha_cuitonline.html"),
                               "w", encoding="utf-8") as f:
                         f.write(html)
-                except OSError:
-                    pass
+                except OSError as exc:
+                    print(f"[aviso] no se pudo escribir el HTML: {exc}",
+                          file=sys.stderr)
             ficha = extraer_ficha_cuitonline(html, cuit)
             estado["ficha"] = ficha
             estado["estado"] = "ok"

@@ -9,7 +9,6 @@ from unittest import mock
 
 from vision import (clasificar, _salida, cargar_perfil, chequear_ram, ejecutar,
                     _parsear_detecciones, modo_objetos_lote)
-import pandas as pd
 
 
 def caja(x1, y1, x2, y2):

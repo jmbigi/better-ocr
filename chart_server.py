@@ -47,6 +47,10 @@ import sys
 import threading
 import time
 from http.server import BaseHTTPRequestHandler, HTTPServer
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:  # solo para anotaciones: pandas no se importa en runtime
+    import pandas as pd
 
 from extractor_final import markdown_a_df, obtener_markdown
 

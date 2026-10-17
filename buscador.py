@@ -28,6 +28,7 @@ import json
 import os
 import re
 import time
+import sys
 import urllib.parse
 
 __all__ = [
@@ -169,8 +170,9 @@ def normalizar_url(url: str) -> str:
                         enc + "=" * (-len(enc) % 4)).decode("utf-8", "replace")
                     if destino.startswith(("http://", "https://")):
                         url = destino
-            except Exception:
-                pass
+            except Exception as exc:
+                print(f"[aviso] no se pudo decodificar el destino: {exc}",
+                      file=sys.stderr)
     parts = urllib.parse.urlsplit(url)
     if not parts.netloc:
         return ""
@@ -395,8 +397,9 @@ def _hay_iframe_recaptcha(pagina) -> bool:
             url = f.url or ""
             if "recaptcha" in url and "/anchor" in url:
                 return True
-    except Exception:
-        pass
+    except Exception as exc:
+        print(f"[aviso] no se pudieron inspeccionar los frames: {exc}",
+              file=sys.stderr)
     return False
 
 
@@ -472,9 +475,11 @@ def resolver_recaptcha_en_pagina(pagina, max_intentos: int = 2,
             continue
         try:
             imagen = capturar_cuadricula(bframe)
-        except Exception:
+        except Exception as exc:
+            print(f"[aviso] no se pudo capturar la cuadricula: {exc}",
+                  file=sys.stderr)
             continue
-        celdas_pil = [(f, c, aumentar_escala(celda))
+        [(f, c, aumentar_escala(celda))
                       for f, c, celda in celdas_grid(imagen, n=n)]
         detecciones = detectar_cuadricula_worker(imagen, n)
         es_variante_none = "skip" in instruccion.lower()

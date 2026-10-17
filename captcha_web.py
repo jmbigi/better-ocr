@@ -27,7 +27,6 @@ import os
 import re
 import socket
 import subprocess
-import sys
 import tempfile
 import time
 import urllib.request
@@ -129,7 +128,6 @@ def _preguntar_ollama(imagen_pil, clase: str, host: str, modelo: str,
                       timeout_s: float) -> str:
     """Una pregunta binaria por celda: 'Does this image contain <clase>?
     Answer only yes or no.' Devuelve el texto crudo del modelo."""
-    from PIL import Image
 
     import io
 
@@ -269,7 +267,6 @@ def env_worker() -> dict:
     nvidia-* del site-packages del VENV y quitar rutas .pyenv.
     """
     import glob
-    import site as _site
 
     raiz = os.path.dirname(os.path.abspath(__file__))
     venv_site = sorted(glob.glob(os.path.join(raiz, ".venv", "lib",
@@ -754,7 +751,6 @@ def resolver_web(url: str, headed: bool = False, salida: str = "",
                 "seleccion": sorted(res.get("seleccion", [])),
                 "descartadas": sorted(res.get("descartadas", [])),
                 "captura": (f"reto_{n}x{n}_i{intento}.png" if salida else ""),
-                "veredicto": resultado,
                 "inciertas": sorted(res.get("inciertas", [])),
                 "detecciones_por_celda": {
                     f"{f},{c}": detecciones.get((f, c), [])

@@ -446,7 +446,7 @@ def descargar_bytes(url, tamanio_max_mb=MAX_TAMANIO_MB):
                 return None
             datos = resp.read()
             if len(datos) / (1024 * 1024) > tamanio_max_mb:
-                print(f"  [SKIP] Zip demasiado grande tras descargar",
+                print("  [SKIP] Zip demasiado grande tras descargar",
                       file=sys.stderr)
                 return None
             return datos

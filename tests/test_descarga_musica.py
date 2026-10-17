@@ -14,8 +14,7 @@ from unittest.mock import patch, MagicMock
 from descarga_musica import (
     archivos_mp3, construir_url_descarga, descargar_archivo,
     descargar_lista, descargar_partitura, demo, buscar_archive,
-    listar_fuentes, PIEZAS_DEMO, DIR_MUSICA,
-    parsear_pagina_mutopia, buscar_catalogo_mutopia, descargar_bytes,
+    listar_fuentes, PIEZAS_DEMO, parsear_pagina_mutopia, buscar_catalogo_mutopia, descargar_bytes,
     descargar_zip_pdfs, descargar_catalogo_mutopia, ESTILOS_MUTOPIA,
     SLUG_ESTILO, _nombre_archivo,
 )
@@ -235,7 +234,6 @@ class TestBuscarArchive(unittest.TestCase):
         mock_resp.read.return_value = json.dumps(respuesta).encode()
         mock_urlopen.return_value = mock_resp
 
-        from descarga_musica import buscar_archive
         resultados = buscar_archive("Bach")
         self.assertEqual(len(resultados), 1)
         self.assertEqual(resultados[0]["identifier"], "test1")

@@ -255,9 +255,9 @@ class TestChartServer(unittest.TestCase):
         )
         try:
             with urllib.request.urlopen(r) as resp:
-                codigo, cuerpo = resp.status, json.loads(resp.read().decode())
+                codigo, _cuerpo = resp.status, json.loads(resp.read().decode())
         except urllib.error.HTTPError as e:
-            codigo, cuerpo = e.code, json.loads(e.read().decode())
+            codigo, _cuerpo = e.code, json.loads(e.read().decode())
         self.assertEqual(codigo, 400)
 
     def test_chart_cuerpo_demasiado_grande(self):
@@ -286,7 +286,7 @@ class TestChartServer(unittest.TestCase):
             headers={"Content-Type": "application/json"},
         )
         try:
-            with urllib.request.urlopen(r) as resp:
+            with urllib.request.urlopen(r):
                 self.fail("deberia rechazarse con 413")
         except urllib.error.HTTPError as e:
             self.assertEqual(e.code, 413)
